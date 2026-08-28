@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, text
 from urllib.parse import quote_plus
 
 from watchlist import WATCHLIST
+import i18n
 
 # ---- 資料庫連線設定，請依你的實際狀況修改 ----
 DB_CONFIG = {
@@ -245,10 +246,6 @@ def load_indicators(stock_id: str) -> pd.DataFrame:
     return df
 
 
-# ---- 語言初始化 ----
-if "lang" not in st.session_state:
-    st.session_state["lang"] = "zh"
-
 st.set_page_config(page_title=t("page_title"), layout="wide")
 
 st.markdown("""
@@ -264,13 +261,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-lang_choice = st.sidebar.radio(
-    t("language"), options=["zh", "en"],
-    format_func=lambda x: "繁體中文" if x == "zh" else "English",
-    index=0 if st.session_state["lang"] == "zh" else 1,
-    horizontal=True,
-)
-st.session_state["lang"] = lang_choice
+i18n.init_language()
 
 st.title(t("title"))
 
