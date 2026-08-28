@@ -1,85 +1,164 @@
-﻿股票代號,中文名稱,官方英文名稱,產業分類,產業分類(英文)
-2454,聯發科技,MediaTek Inc.,半導體 — IC 設計,Semiconductors — Fabless
-3443,創意電子,Global Unichip Corp.,半導體 — IC 設計,Semiconductors — Fabless
-3661,世芯電子,"Alchip Technologies, Limited",半導體 — IC 設計,Semiconductors — Fabless
-2330,台灣積體電路製造,"Taiwan Semiconductor Manufacturing Company, Ltd.",半導體 — 晶圓代工,Semiconductor — Foundry
-2303,聯電子,United Microelectronics Corp.,半導體 — 晶圓代工,Semiconductor — Foundry
-5347,世界先進,Vanguard International Semiconductor Corporation,半導體 — 晶圓代工,Semiconductor — Foundry
-3711,日月光投資控股,"ASE Technology Holding Co., Ltd.",半導體 — 封測,Semiconductor — Packaging & Testing
-2449,京元電子,Walton Advanced Engineering Inc.,半導體 — 封測,Semiconductor — Packaging & Testing
-7769,鴻勁精密,"Hong King Precision Co., Ltd.",半導體 — 封測,Semiconductor — Packaging & Testing
-2408,南亞科技,Nanya Technology Corporation,半導體 — 記憶體,Semiconductor — Memory
-2344,華邦電子,Winbond Electronics Corporation,半導體 — 記憶體,Semiconductor — Memory
-2337,旺宏,"Macronix International Co., Ltd.",半導體 — 記憶體,Semiconductor — Memory
-2382,廣達電腦,Quanta Computer Inc.,電子代工 — AI 伺服器與資料中心主導,EMS & ODM — AI Servers & Data Centers
-6669,緯穎科技,Wiwynn Corporation,電子代工 — AI 伺服器與資料中心主導,EMS & ODM — AI Servers & Data Centers
-2317,鴻海精密工業,"Hon Hai Precision Industry Co., Ltd.",電子代工 — AI 伺服器與資料中心主導,EMS & ODM — AI Servers & Data Centers
-3231,緯創資通,Wistron Corporation,電子代工 — AI 伺服器與資料中心主導,EMS & ODM — AI Servers & Data Centers
-2357,華碩電腦,ASUSTeK Computer Inc.,電子代工 — 消費性電子與混合代工,EMS & ODM — Consumer & Hybrid Electronics
-2324,仁寶,"Compal Electronics, Inc.",電子代工 — 消費性電子與混合代工,EMS & ODM — Consumer & Hybrid Electronics
-2356,英業達,Inventec Corporation,電子代工 — 消費性電子與混合代工,EMS & ODM — Consumer & Hybrid Electronics
-3017,奇鋐科技,"Asia Vital Components Co., Ltd.",散熱,Thermal Management
-3324,雙鴻科技,"Auras Technology Co., Ltd.",散熱,Thermal Management
-3653,健策精密工業,"JPC Enterprise Co., Ltd.",散熱,Thermal Management
-2383,台光電子材料,"Elite Material Co., Ltd.",高階 PCB/CCL,High-End PCB & CCL
-2368,金像電子,Gold Circuit Electronics Ltd.,高階 PCB/CCL,High-End PCB & CCL
-2327,國巨,Yageo Corporation,被動元件,Passives / Passive Components
-2492,華新科技,Walsin Technology Corporation,被動元件,Passives / Passive Components
-3026,禾伸堂企業,"Holy Stone Enterprise Co., Ltd.",被動元件,Passives / Passive Components
-3037,欣興電子,Unimicron Technology Corp.,載板與 PCB,Substrates & PCBs
-8046,南亞電路板,Nan Ya Printed Circuit Board Corporation,載板與 PCB,Substrates & PCBs
-4958,臻鼎科技控股,Zhen Ding Technology Holding Limited,載板與 PCB,Substrates & PCBs
-2308,台達電子工業,"Delta Electronics, Inc.",電源管理 / 工業電子,Power Management & Industrial Electronics
-1513,中興電工機械,"Fortune Electric Co., Ltd.",電源管理 / 工業電子,Power Management & Industrial Electronics
-2301,光寶科技,LITE-ON Technology Corporation,電源管理 / 工業電子,Power Management & Industrial Electronics
-2059,川湖科技,"King Slide Technology Co., Ltd.",精密機構件,Precision Mechanical Components
-3548,兆利,"Jarllytec Co., Ltd.",精密機構件,Precision Mechanical Components
-6805,富世達,Fositek Corporation,精密機構件,Precision Mechanical Components
-3665,貿聯集團,BizLink Holding Inc.,連接器/線纜,Connectors & Cables
-3023,信邦,"SINBON Electronics Co., Ltd.",連接器/線纜,Connectors & Cables
-6290,良維,LONGWELL COMPANY,連接器/線纜,Connectors & Cables
-3008,大立光電,"Largan Precision Co., Ltd.",光學元件,Optical Components
-3406,玉晶光電,"Genius Electronic Optical Co., Ltd.",光學元件,Optical Components
-3019,亞洲光學,"Asia Optical Co., Inc.",光學元件,Optical Components
-2395,研華,"Advantech Co., Ltd.",工業電腦/物聯網,Industrial Computers & IoT
-6414,樺漢,Ennoconn Corporation,工業電腦/物聯網,Industrial Computers & IoT
-6166,凌華,ADLINK Technology Inc.,工業電腦/物聯網,Industrial Computers & IoT
-2360,致茂電子,Chroma ATE Inc.,測試儀器,Test & Measurement Equipment
-3567,由田,"Utechzone Co., Ltd.",測試儀器,Test & Measurement Equipment
-5443,均豪精密工業,"Gallant Precision Machining Co., Ltd.",測試儀器,Test & Measurement Equipment
-2412,中華電信,"Chunghwa Telecom Co., Ltd.",電信服務商,Telecommunication Services
-3045,台灣大哥大,"Taiwan Mobile Co., Ltd.",電信服務商,Telecommunication Services
-4904,遠傳電信,"Far EasTone Telecommunications Co., Ltd.",電信服務商,Telecommunication Services
-2345,智邦科技,Accton Technology Corporation,網通設備,Networking Equipment
+股票代號,中文名稱,官方英文名稱,產業分類,產業分類(英文)
+2454,聯發科技,MediaTek Inc.,半導體－IC設計,Semiconductors — IC Design
+3443,創意電子,Global Unichip Corp.,半導體－IC設計,Semiconductors — IC Design
+3661,世芯電子,Alchip Technologies Ltd.,半導體－IC設計,Semiconductors — IC Design
+2379,瑞昱半導體,Realtek Semiconductor Corp.,半導體－IC設計,Semiconductors — IC Design
+3034,聯詠科技,Novatek Microelectronics Corp.,半導體－IC設計,Semiconductors — IC Design
+6415,矽力-KY,Silergy Corp.,半導體－IC設計,Semiconductors — IC Design
+8081,致新科技,Global Mixed-mode Technology Inc.,半導體－IC設計,Semiconductors — IC Design
+6138,茂達電子,Anpec Electronics Corp.,半導體－IC設計,Semiconductors — IC Design
+5269,祥碩科技,ASMedia Technology Inc.,半導體－IC設計,Semiconductors — IC Design
+3035,智原科技,Faraday Technology Corp.,半導體－IC設計,Semiconductors — IC Design
+2330,台灣積體電路製造,Taiwan Semiconductor Manufacturing Company Ltd.,半導體－晶圓代工,Semiconductors — Foundry
+2303,聯華電子,United Microelectronics Corp.,半導體－晶圓代工,Semiconductors — Foundry
+5347,世界先進積體電路,Vanguard International Semiconductor Corp.,半導體－晶圓代工,Semiconductors — Foundry
+6770,力積電,Powerchip Semiconductor Manufacturing Corp.,半導體－晶圓代工,Semiconductors — Foundry
+3707,漢磊科技,Episil Technologies Inc.,半導體－晶圓代工,Semiconductors — Foundry
+2342,茂矽電子,Mosel Vitelic Inc.,半導體－晶圓代工,Semiconductors — Foundry
+3711,日月光投資控股,ASE Technology Holding Co. Ltd.,半導體－封測,Semiconductors — Assembly & Test
+2449,京元電子,King Yuan Electronics Co. Ltd.,半導體－封測,Semiconductors — Assembly & Test
+7769,鴻勁精密,Chunghsin Precision Technology Co. Ltd.,半導體－封測,Semiconductors — Assembly & Test
+6239,力成科技,Powertech Technology Inc.,半導體－封測,Semiconductors — Assembly & Test
+8150,南茂科技,ChipMOS Technologies Inc.,半導體－封測,Semiconductors — Assembly & Test
+6147,頎邦科技,Chipbond Technology Corp.,半導體－封測,Semiconductors — Assembly & Test
+3374,精材科技,Xintec Inc.,半導體－封測,Semiconductors — Assembly & Test
+2441,超豐電子,Greatek Electronics Inc.,半導體－封測,Semiconductors — Assembly & Test
+2408,南亞科技,Nanya Technology Corp.,半導體－記憶體,Semiconductors — Memory
+2344,華邦電子,Winbond Electronics Corp.,半導體－記憶體,Semiconductors — Memory
+2337,旺宏電子,Macronix International Co. Ltd.,半導體－記憶體,Semiconductors — Memory
+8299,群聯電子,Phison Electronics Corp.,半導體－記憶體,Semiconductors — Memory
+4967,十銓科技,Team Group Inc.,半導體－記憶體,Semiconductors — Memory
+3260,威剛科技,ADATA Technology Co. Ltd.,半導體－記憶體,Semiconductors — Memory
+2451,創見資訊,Transcend Information Inc.,半導體－記憶體,Semiconductors — Memory
+2382,廣達電腦,Quanta Computer Inc.,電子代工,Electronics Manufacturing Services
+6669,緯穎科技,Wiwynn Corp.,電子代工,Electronics Manufacturing Services
+2317,鴻海精密工業,Hon Hai Precision Industry Co. Ltd.,電子代工,Electronics Manufacturing Services
+3231,緯創資通,Wistron Corp.,電子代工,Electronics Manufacturing Services
+2357,華碩電腦,ASUSTeK Computer Inc.,電子代工,Electronics Manufacturing Services
+2324,仁寶電腦,Compal Electronics Inc.,電子代工,Electronics Manufacturing Services
+2356,英業達,Inventec Corp.,電子代工,Electronics Manufacturing Services
+4938,和碩聯合科技,Pegatron Corp.,電子代工,Electronics Manufacturing Services
+3017,奇鋐科技,Auras Technology Co. Ltd.,散熱,Thermal Solutions
+3324,雙鴻科技,Asia Vital Components Co. Ltd.,散熱,Thermal Solutions
+3653,健策精密工業,Chaun-Choung Technology Corp.,散熱,Thermal Solutions
+2421,建準電機工業,Sunonwealth Electric Machine Industry Co. Ltd.,散熱,Thermal Solutions
+8996,高力熱處理科技,Golden Bridge Electech Inc.,散熱,Thermal Solutions
+6230,尼得科超眾科技,Nidec (GPM) Corp.,散熱,Thermal Solutions
+2383,台光電子材料,Elite Material Co. Ltd.,PCB／載板／CCL,PCB / Substrates / CCL
+2368,金像電子工業,Gold Circuit Electronics Ltd.,PCB／載板／CCL,PCB / Substrates / CCL
+6274,台燿科技,Taiflex Scientific Co. Ltd.,PCB／載板／CCL,PCB / Substrates / CCL
+6213,聯茂電子,ITEQ Corp.,PCB／載板／CCL,PCB / Substrates / CCL
+3044,健鼎科技,Tripod Technology Corporation,PCB／載板／CCL,PCB / Substrates / CCL
+3037,欣興電子,Unimicron Technology Corp.,PCB／載板／CCL,PCB / Substrates / CCL
+8046,南亞電路板,Nan Ya PCB Corp.,PCB／載板／CCL,PCB / Substrates / CCL
+4958,臻鼎科技控股,Zhen Ding Technology Holding Ltd.,PCB／載板／CCL,PCB / Substrates / CCL
+3189,景碩科技,Kinsus Interconnect Technology Corp.,PCB／載板／CCL,PCB / Substrates / CCL
+2327,國巨股份,Yageo Corp.,被動元件,Passive Components
+2492,華新科技,Walsin Technology Corp.,被動元件,Passive Components
+3026,禾伸堂企業,Holy Stone Enterprise Co. Ltd.,被動元件,Passive Components
+3357,台慶科技,Taiwan PCB Techvest Co. Ltd.,被動元件,Passive Components
+6173,信昌電子陶瓷,Ferro-Tech Co. Ltd.,被動元件,Passive Components
+2472,立隆電子工業,Lelon Electronics Corp.,被動元件,Passive Components
+2308,台達電子工業,Delta Electronics Inc.,電源管理/重電,Power Management / Heavy Electric
+1513,中興電工機械,CHIN-EW Electric Machinery Co. Ltd.,電源管理/重電,Power Management / Heavy Electric
+2301,光寶科技,Lite-On Technology Corp.,電源管理/重電,Power Management / Heavy Electric
+1519,華城電機,Hua Eng Wire & Cable Co. Ltd.,電源管理/重電,Power Management / Heavy Electric
+1503,士林電機,Shihlin Electric & Engineering Corp.,電源管理/重電,Power Management / Heavy Electric
+1514,亞力電機工業,"Allis Electric Co.,LTD",電源管理/重電,Power Management / Heavy Electric
+6282,康舒科技,Acbel Polytech Inc.,電源管理/重電,Power Management / Heavy Electric
+6412,群光電能科技,Chicony Power Technology,電源管理/重電,Power Management / Heavy Electric
+2059,川湖科技,King Slide Works Co. Ltd.,精密機構件,Precision Mechanical Components
+3548,兆利科技工業,Jarllytec Co. Ltd.,精密機構件,Precision Mechanical Components
+6805,富世達,Fositek Corp.,精密機構件,Precision Mechanical Components
+3013,晟銘電子科技,Chenming Electronic Technology,精密機構件,Precision Mechanical Components
+2354,鴻準精密工業,Foxconn Technology Co. Ltd.,精密機構件,Precision Mechanical Components
+8210,勤誠興業,Chenbro Micom Co. Ltd.,精密機構件,Precision Mechanical Components
+3665,貿聯控股,Bizlink Holding Inc.,連接器/線纜,Connectors / Cables
+3023,信邦電子,Sinbon Electronics Co. Ltd.,連接器/線纜,Connectors / Cables
+6290,良維科技,Lien Chang Electronic Enterprise Co. Ltd.,連接器/線纜,Connectors / Cables
+3533,嘉澤端子,Chant Sincere Co. Ltd.,連接器/線纜,Connectors / Cables
+6205,詮欣股份,Chief Land Electronic Co. Ltd.,連接器/線纜,Connectors / Cables
+3008,大立光電,Largan Precision Co. Ltd.,光學元件,Optical Components
+3406,玉晶光電,Genius Electronic Optical Co. Ltd.,光學元件,Optical Components
+3019,亞洲光學,Asia Optical Co. Inc.,光學元件,Optical Components
+3362,先進光電科技,Ability Opto-Electronics Technology,光學元件,Optical Components
+4976,佳凌科技,Calin Technology Co. Ltd.,光學元件,Optical Components
+6209,今國光學工業,Kinko Optical Co. Ltd.,光學元件,Optical Components
+2395,研華股份,Advantech Co. Ltd.,工業電腦/物聯網,Industrial PC / IoT
+6414,樺漢科技,Ennoconn Corp.,工業電腦/物聯網,Industrial PC / IoT
+6166,凌華科技,ADLINK Technology Inc.,工業電腦/物聯網,Industrial PC / IoT
+8234,新漢股份,Nexcom International Co. Ltd.,工業電腦/物聯網,Industrial PC / IoT
+6206,飛捷科技,Posiflex Technology Inc.,工業電腦/物聯網,Industrial PC / IoT
+8050,廣積科技,IBASE Technology,工業電腦/物聯網,Industrial PC / IoT
+2360,致茂電子,Chroma ATE Inc.,測試儀器,Test Equipment
+3567,由田新技,UTechZone Co. Ltd.,測試儀器,Test Equipment
+5443,均豪精密工業,Gallant Precision Machining Co. Ltd.,測試儀器,Test Equipment
+3030,德律科技,TRI Test Research Inc.,測試儀器,Test Equipment
+6187,萬潤科技,All Ring Tech,測試儀器,Test Equipment
+3563,牧德科技,UMTech Co. Ltd.,測試儀器,Test Equipment
+2412,中華電信,Chunghwa Telecom Co. Ltd.,電信服務商,Telecom Carriers
+3045,台灣大哥大,Taiwan Mobile Co. Ltd.,電信服務商,Telecom Carriers
+4904,遠傳電信,Far EasTone Telecommunications Co. Ltd.,電信服務商,Telecom Carriers
+2345,智邦科技,Accton Technology Corp.,網通設備,Networking Equipment
 5388,中磊電子,Sercomm Corporation,網通設備,Networking Equipment
-3380,明泰,Alpha Networks Inc.,網通設備,Networking Equipment
-2880,華南金融控股,"Hua Nan Financial Holdings Co., Ltd.",金控 — 銀行為主,Financial Holding — Bank-Centric
-2886,兆豐金融控股,"Mega Financial Holding Co., Ltd.",金控 — 銀行為主,Financial Holding — Bank-Centric
-2890,永豐金融控股,Sinopac Financial Holdings Company Limited,金控 — 銀行為主,Financial Holding — Bank-Centric
-2891,中國信託金融控股,"CTBC Financial Holding Co., Ltd.",金控 — 銀行為主,Financial Holding — Bank-Centric
-2892,第一金融控股,"First Financial Holding Co., Ltd.",金控 — 銀行為主,Financial Holding — Bank-Centric
-5880,合作金庫金融控股,"Taiwan Cooperative Financial Holding Co., Ltd.",金控 — 銀行為主,Financial Holding — Bank-Centric
-2882,國泰金融控股,"Cathay Financial Holding Co., Ltd.",金控 — 壽險為主,Financial Holding — Life Insurance-Centric
-2881,富邦金融控股,"Fubon Financial Holding Co., Ltd.",金控 — 壽險為主,Financial Holding — Life Insurance-Centric
-2888,新光金融控股,"Shin Kong Financial Holding Co., Ltd.",金控 — 壽險為主,Financial Holding — Life Insurance-Centric
-2885,元大金融控股,"Yuanta Financial Holding Co., Ltd.",金控 — 證券為主,Financial Holding — Securities-Centric
-2883,凱基金融控股,"KGI Financial Holding Co., Ltd.",金控 — 證券為主,Financial Holding — Securities-Centric
-2889,國票金融控股,"IBF Financial Holdings Co., Ltd.",金控 — 證券為主,Financial Holding — Securities-Centric
-2884,玉山金融控股,"E.Sun Financial Holding Co., Ltd.",金控 — 綜合銀行,Financial Holdings — Diversified Financials
-2887,台新金融控股,"Taishin Financial Holding Co., Ltd.",金控 — 綜合銀行,Financial Holdings — Diversified Financials
-2897,王道商業銀行,"O-Bank Co., Ltd.",金控 — 綜合銀行,Financial Holdings — Diversified Financials
-2603,長榮海運,Evergreen Marine Corporation (Taiwan) Ltd.,航運,Marine Transportation
-2609,陽明海運,Yang Ming Marine Transport Corporation,航運,Marine Transportation
-2615,萬海航運,Wan Hai Lines Ltd.,航運,Marine Transportation
-6505,台塑化,Formosa Petrochemical Corporation,石化/煉油,Petrochemicals & Refining
-1301,台灣塑膠工業,Formosa Plastics Corporation,石化/煉油,Petrochemicals & Refining
-1326,台灣化學纖維,Formosa Chemicals & Fibre Corporation,石化/煉油,Petrochemicals & Refining
-1303,南亞塑膠工業,Nan Ya Plastics Corporation,塑膠/石化原料,Plastics & Petrochemical Feedstocks
-1304,台灣聚合化學品,USI Corporation,塑膠/石化原料,Plastics & Petrochemical Feedstocks
-1305,華夏海灣塑膠,China General Plastics Corporation,塑膠/石化原料,Plastics & Petrochemical Feedstocks
-1216,統一企業,Uni-President Enterprises Corp.,食品/多角化零售,Food & Diversified Retail
-1210,大成,"Great Wall Enterprise Co., Ltd.",食品/多角化零售,Food & Diversified Retail
-1215,台灣卜蜂企業,"Charoen Pokphand Enterprise (Taiwan) Co., Ltd.",食品/多角化零售,Food & Diversified Retail
-0050,元大台灣50,Yuanta Taiwan Top 50 ETF,指數型商品,Index-Linked Products / ETFs
-00631L,元大台灣50正2,Yuanta Taiwan Top 50 Leveraged 2X ETF,指數型商品,Index-Linked Products / ETFs
-00632R,元大台灣50反1,Yuanta Taiwan Top 50 Inverse -1 ETF,指數型商品,Index-Linked Products / ETFs
+3380,明泰科技,Alpha Networks Inc.,網通設備,Networking Equipment
+6285,啟碁科技,Wistron NeWeb Corp.,網通設備,Networking Equipment
+3596,智易科技,Arcadyan Technology Corp.,網通設備,Networking Equipment
+4906,正文科技,Gemtek Technology Co. Ltd.,網通設備,Networking Equipment
+2880,華南金融控股,Hua Nan Financial Holdings Co. Ltd.,金控－銀行,Financial Holdings — Banking
+2886,兆豐金融控股,Mega Financial Holding Co. Ltd.,金控－銀行,Financial Holdings — Banking
+2890,永豐金融控股,SinoPac Financial Holdings Co. Ltd.,金控－銀行,Financial Holdings — Banking
+2891,中國信託金融控股,CTBC Financial Holding Co. Ltd.,金控－銀行,Financial Holdings — Banking
+2892,第一金融控股,First Financial Holding Co. Ltd.,金控－銀行,Financial Holdings — Banking
+5880,合作金庫金融控股,Taiwan Cooperative Financial Holding Co. Ltd.,金控－銀行,Financial Holdings — Banking
+5876,上海商業儲蓄銀行,The Shanghai Commercial & Savings Bank Ltd.,金控－銀行,Financial Holdings — Banking
+2834,臺灣中小企業銀行,Taiwan Business Bank,金控－銀行,Financial Holdings — Banking
+2884,玉山金融控股,E.SUN Financial Holding Co. Ltd.,金控－銀行,Financial Holdings — Banking
+2887,台新金融控股,Taishin Financial Holding Co. Ltd.,金控－銀行,Financial Holdings — Banking
+2897,王道銀行控股,O-Bank Co. Ltd.,金控－銀行,Financial Holdings — Banking
+2882,國泰金融控股,Cathay Financial Holding Co. Ltd.,金控－壽險為主,Financial Holdings — Insurance-led
+2881,富邦金融控股,Fubon Financial Holding Co. Ltd.,金控－壽險為主,Financial Holdings — Insurance-led
+2888,新光金融控股,Shin Kong Financial Holding Co. Ltd.,金控－壽險為主,Financial Holdings — Insurance-led
+2885,元大金融控股,Yuanta Financial Holding Co. Ltd.,金控－證券為主,Financial Holdings — Securities-led
+2883,凱基金融控股,CDIB / KGI Financial Holding Co. Ltd.,金控－證券為主,Financial Holdings — Securities-led
+2889,國票金融控股,IBF Financial Holdings Co. Ltd.,金控－證券為主,Financial Holdings — Securities-led
+6005,群益金鼎證券,Capital Securities Corp.,金控－證券為主,Financial Holdings — Securities-led
+2855,統一綜合證券,Uni-President Securities Co. Ltd.,金控－證券為主,Financial Holdings — Securities-led
+2603,長榮海運,Evergreen Marine Corp.,航運,Shipping
+2609,陽明海運,Yang Ming Marine Transport Corp.,航運,Shipping
+2615,萬海航運,Wan Hai Lines Ltd.,航運,Shipping
+2637,慧洋海運,Wisdom Marine Lines Co. Ltd.,航運,Shipping
+2606,裕民航運,U-Ming Marine Transport Corp.,航運,Shipping
+2618,長榮航空,EVA Airways Corp.,航運,Shipping
+2610,中華航空,China Airlines Ltd.,航運,Shipping
+1303,南亞塑膠工業,Nan Ya Plastics Corp.,塑膠/石化及煉油,Plastics / Petrochemicals & Refining
+1304,台灣聚合化學品,USI Corporation,塑膠/石化及煉油,Plastics / Petrochemicals & Refining
+1305,華夏海灣塑膠,China General Plastics Corporation,塑膠/石化及煉油,Plastics / Petrochemicals & Refining
+6505,台灣化學纖維（台塑石化）,Formosa Petrochemical Corp.,塑膠/石化及煉油,Plastics / Petrochemicals & Refining
+1301,台灣塑膠工業,Formosa Plastics Corp.,塑膠/石化及煉油,Plastics / Petrochemicals & Refining
+1326,台灣化學纖維,Formosa Chemicals & Fibre Corp.,塑膠/石化及煉油,Plastics / Petrochemicals & Refining
+1314,中國石油化學工業開發,China Petrochemical Development Corp.,塑膠/石化及煉油,Plastics / Petrochemicals & Refining
+1216,統一企業,Uni-President Enterprises Corp.,食品/多角化零售,Food / Diversified Retail
+1210,大成長城企業,Great Wall Enterprise Co. Ltd.,食品/多角化零售,Food / Diversified Retail
+1215,卜蜂企業,Charoen Pokphand Enterprise (Taiwan) Co. Ltd.,食品/多角化零售,Food / Diversified Retail
+2912,統一超商,President Chain Store Corp.,食品/多角化零售,Food / Diversified Retail
+5903,全家便利商店,FamilyMart Co. Ltd.,食品/多角化零售,Food / Diversified Retail
+2903,遠東百貨,Far Eastern Department Stores Co. Ltd.,食品/多角化零售,Food / Diversified Retail
+1229,聯華實業,Lien Hwa Industrial Holdings Corp.,食品/多角化零售,Food / Diversified Retail
+2905,三商行,"Mercuries & Associates Holding, Ltd.",食品/多角化零售,Food / Diversified Retail
+3081,聯亞光電,LandMark Optoelectronics Corporation,光通訊,Optical Communications
+2455,全新光電,Visual Photonics Epitaxy Co. Ltd.,光通訊,Optical Communications
+3363,上詮光纖通信,FOCI Fiber Optic Communications,光通訊,Optical Communications
+3163,波若威科技,Browave Corporation,光通訊,Optical Communications
+4908,前鼎光電,APAC Opto Electronics Inc.,光通訊,Optical Communications
+4977,眾達-KY,"PCL Technologies, Inc.",光通訊,Optical Communications
+4979,華星光通,LuxNet Corporation,光通訊,Optical Communications
+2002,中國鋼鐵,China Steel Corp.,鋼鐵,Steel
+2027,大成不銹鋼,Ta Chen Stainless Pipe Co. Ltd.,鋼鐵,Steel
+2006,東和鋼鐵企業,Tung Ho Steel Enterprise Corp.,鋼鐵,Steel
+2014,中鴻鋼鐵,Chung Hung Steel Corporation,鋼鐵,Steel
+2015,豐興鋼鐵,Feng Hsin Iron & Steel Co. Ltd.,鋼鐵,Steel
+5009,榮剛材料科技,Gloria Material Technology Corp.,鋼鐵,Steel
+0050,元大台灣50,Yuanta Taiwan Top 50 ETF,ETF,ETF
+00631L,元大台灣50正2,Yuanta Taiwan Top 50 Leveraged ETF,ETF,ETF
+00632R,元大台灣50反1,Yuanta Taiwan Top 50 Inverse ETF,ETF,ETF
