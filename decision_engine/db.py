@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from urllib.parse import quote_plus
 
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 # ---------------------------------------------------------------------------
 # 連線設定：沿用專案既有的 .env / st.secrets 模式
@@ -107,7 +107,7 @@ def load_price_history(stock_ids: list[str], lookback_days: int = 90) -> pd.Data
         order by {c['stock_id']}, {c['date']}
     """
     with get_conn() as conn:
-        df = pd.read_sql(sql, conn, params={"ids": stock_ids})
+        df = pd.read_sql(text(sql), conn, params={"ids": stock_ids})
     # 只保留每檔股票最近 lookback_days 筆
     df = (
         df.sort_values(["stock_id", "date"])
@@ -133,7 +133,7 @@ def load_latest_indicators(stock_ids: list[str]) -> pd.DataFrame:
         order by {c['stock_id']}, {c['date']} desc
     """
     with get_conn() as conn:
-        df = pd.read_sql(sql, conn, params={"ids": stock_ids})
+        df = pd.read_sql(text(sql), conn, params={"ids": stock_ids})
     df["macd_hist"] = df["macd"] - df["macd_signal"]
     return df
 
@@ -148,4 +148,4 @@ def load_stock_info(stock_ids: list[str]) -> pd.DataFrame:
         where {c['stock_id']} = any(:ids)
     """
     with get_conn() as conn:
-        return pd.read_sql(sql, conn, params={"ids": stock_ids})
+        return pd.read_sql(text(sql), conn, params={"ids": stock_ids})
