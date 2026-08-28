@@ -6,6 +6,7 @@ decision_engine/db.py
 已對照專案真實 schema 修正 COLUMNS 字典（staging.daily_master /
 mart.technical_indicators / raw.stock_info）。
 """
+from decimal import Decimal
 from __future__ import annotations
 import os
 from contextlib import contextmanager
@@ -106,7 +107,13 @@ def _query_df(sql: str, params: dict) -> pd.DataFrame:
         result = conn.execute(text(sql), params)
         rows = result.fetchall()
         columns = list(result.keys())
-    return pd.DataFrame(rows, columns=columns)
+    df = pd.DataFrame(rows, columns=columns)
+
+    for col in df.columns:
+        if df[col].apply(lambda v: isinstance(v, Decimal)).any():
+            df[col] = df[col].astype(float)
+
+    return df
 
 
 def load_price_history(stock_ids: list[str], lookback_days: int = 90) -> pd.DataFrame:
