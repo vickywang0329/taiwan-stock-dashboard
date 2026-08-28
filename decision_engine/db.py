@@ -94,6 +94,21 @@ COLUMNS = {
 }
 
 
+def _query_df(sql: str, params: dict) -> pd.DataFrame:
+    """
+    用 SQLAlchemy 原生的 conn.execute() 執行查詢後手動組成 DataFrame，
+    不透過 pd.read_sql()——某些 pandas / SQLAlchemy 版本組合下，
+    pd.read_sql() 對 text() 物件的判斷有相容性問題，即使正確用 text()
+    包裝，仍可能誤走到不支援具名參數的路徑，導致 ":ids" 這種語法
+    直接被送進資料庫報錯。改用這個函式可以完全繞開該問題。
+    """
+    with get_conn() as conn:
+        result = conn.execute(text(sql), params)
+        rows = result.fetchall()
+        columns = list(result.keys())
+    return pd.DataFrame(rows, columns=columns)
+
+
 def load_price_history(stock_ids: list[str], lookback_days: int = 90) -> pd.DataFrame:
     """撈近 N 個交易日的價格 + 三大法人淨額（用於算分數與技術指標）。"""
     c = COLUMNS["daily_master"]
@@ -106,8 +121,7 @@ def load_price_history(stock_ids: list[str], lookback_days: int = 90) -> pd.Data
         where {c['stock_id']} = any(:ids)
         order by {c['stock_id']}, {c['date']}
     """
-    with get_conn() as conn:
-        df = pd.read_sql(text(sql), conn, params={"ids": stock_ids})
+    df = _query_df(sql, {"ids": stock_ids})
     # 只保留每檔股票最近 lookback_days 筆
     df = (
         df.sort_values(["stock_id", "date"])
@@ -132,8 +146,7 @@ def load_latest_indicators(stock_ids: list[str]) -> pd.DataFrame:
         where {c['stock_id']} = any(:ids)
         order by {c['stock_id']}, {c['date']} desc
     """
-    with get_conn() as conn:
-        df = pd.read_sql(text(sql), conn, params={"ids": stock_ids})
+    df = _query_df(sql, {"ids": stock_ids})
     df["macd_hist"] = df["macd"] - df["macd_signal"]
     return df
 
@@ -147,5 +160,4 @@ def load_stock_info(stock_ids: list[str]) -> pd.DataFrame:
         from {c['table']}
         where {c['stock_id']} = any(:ids)
     """
-    with get_conn() as conn:
-        return pd.read_sql(text(sql), conn, params={"ids": stock_ids})
+    return _query_df(sql, {"ids": stock_ids})
