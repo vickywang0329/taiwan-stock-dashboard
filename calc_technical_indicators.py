@@ -65,6 +65,21 @@ def calc_kd(high: pd.Series, low: pd.Series, close: pd.Series,
     return k, d
 
 
+def calc_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """
+    ATR（Average True Range，平均真實區間）
+    True Range 取三者最大值：當日高低差 / |當日高-昨收| / |當日低-昨收|
+    再取近 period 天的簡單移動平均
+    """
+    prev_close = close.shift(1)
+    tr1 = high - low
+    tr2 = (high - prev_close).abs()
+    tr3 = (low - prev_close).abs()
+    true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = true_range.rolling(window=period).mean()
+    return atr
+
+
 def transform(engine, stock_id: str) -> pd.DataFrame:
     df = pd.read_sql(
         text("SELECT date, stock_id, high, low, close FROM staging.daily_master "
@@ -78,9 +93,10 @@ def transform(engine, stock_id: str) -> pd.DataFrame:
     df["rsi_14"] = calc_rsi(df["close"], period=14)
     df["macd"], df["macd_signal"] = calc_macd(df["close"])
     df["kd_k"], df["kd_d"] = calc_kd(df["high"], df["low"], df["close"])
+    df["atr14"] = calc_atr(df["high"], df["low"], df["close"], period=14)
 
     result = df[["date", "stock_id", "ma5", "ma20", "ma60", "rsi_14",
-                 "macd", "macd_signal", "kd_k", "kd_d"]]
+                 "macd", "macd_signal", "kd_k", "kd_d", "atr14"]]
     # 前面天數不足以算出指標的列會是 NaN，轉成 None 讓資料庫存成 NULL
     result = result.replace({np.nan: None})
     return result
