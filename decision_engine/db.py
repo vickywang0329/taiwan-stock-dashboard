@@ -9,6 +9,7 @@ mart.technical_indicators / raw.stock_info）。
 from __future__ import annotations
 import os
 from contextlib import contextmanager
+from urllib.parse import quote_plus
 
 import pandas as pd
 from sqlalchemy import create_engine
@@ -33,7 +34,8 @@ def get_engine():
     host = _get_secret("DB_HOST", "aws-0-ap-northeast-1.pooler.supabase.com")
     port = _get_secret("DB_PORT", "5432")
     dbname = _get_secret("DB_NAME", "postgres")
-    url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}"
+    safe_password = quote_plus(password) if password else password
+    url = f"postgresql+psycopg2://{user}:{safe_password}@{host}:{port}/{dbname}"
     return create_engine(url, pool_pre_ping=True)
 
 
