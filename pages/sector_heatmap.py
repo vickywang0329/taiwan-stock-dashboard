@@ -10,6 +10,9 @@ import plotly.express as px
 from sqlalchemy import create_engine, text
 from urllib.parse import quote_plus
 
+import sector_flow
+import i18n
+
 DB_CONFIG = {
     "user": st.secrets.get("db_user", "postgres"),
     "password": st.secrets["db_password"],
@@ -126,70 +129,20 @@ def load_sector_data() -> pd.DataFrame:
     """
     抓每檔股票：最新收盤價、最新成交值、近3日與近10日的三大法人合計買賣超股數之和、
     近3日與近10日的價格報酬率，並關聯產業分類
+
+    實際邏輯在 sector_flow.py（跟 decision_engine 共用同一份），
+    這裡只是包一層 Streamlit 快取。
     """
-    engine = get_engine()
-    query = text("""
-        WITH ranked AS (
-            SELECT
-                m.date, m.stock_id, m.close, m.trading_value,
-                m.institutional_total_net,
-                LAG(m.close, 3) OVER (PARTITION BY m.stock_id ORDER BY m.date) AS close_3d_ago,
-                LAG(m.close, 10) OVER (PARTITION BY m.stock_id ORDER BY m.date) AS close_10d_ago,
-                LAG(m.close, 20) OVER (PARTITION BY m.stock_id ORDER BY m.date) AS close_20d_ago,
-                LAG(m.close, 60) OVER (PARTITION BY m.stock_id ORDER BY m.date) AS close_60d_ago,
-                SUM(m.institutional_total_net) OVER (
-                    PARTITION BY m.stock_id ORDER BY m.date
-                    ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
-                ) AS inst_net_3d_shares,
-                SUM(m.institutional_total_net) OVER (
-                    PARTITION BY m.stock_id ORDER BY m.date
-                    ROWS BETWEEN 9 PRECEDING AND CURRENT ROW
-                ) AS inst_net_10d_shares,
-                ROW_NUMBER() OVER (PARTITION BY m.stock_id ORDER BY m.date DESC) AS rn
-            FROM staging.daily_master m
-        )
-        SELECT r.date, r.stock_id, r.close, r.trading_value,
-               r.close_3d_ago, r.close_10d_ago, r.close_20d_ago, r.close_60d_ago,
-               r.inst_net_3d_shares, r.inst_net_10d_shares,
-               s.industry AS industry_zh, s.industry_en, s.name_zh, s.name_en
-        FROM ranked r
-        LEFT JOIN raw.stock_info s ON s.stock_id = r.stock_id
-        WHERE r.rn = 1
-    """)
-    df = pd.read_sql(query, engine)
-
-    df["momentum_3d"] = (df["close"] - df["close_3d_ago"]) / df["close_3d_ago"] * 100
-    df["inst_strength_3d"] = df["inst_net_3d_shares"] * df["close"]
-    df["momentum_10d"] = (df["close"] - df["close_10d_ago"]) / df["close_10d_ago"] * 100
-    df["inst_strength_10d"] = df["inst_net_10d_shares"] * df["close"]
-    df["momentum_20d"] = (df["close"] - df["close_20d_ago"]) / df["close_20d_ago"] * 100
-    df["momentum_60d"] = (df["close"] - df["close_60d_ago"]) / df["close_60d_ago"] * 100
-
-    df = df.dropna(subset=["industry_zh"])
-    df = df[df["industry_zh"].str.len() > 0]
-    return df
-
-
-def minmax_normalize(series: pd.Series) -> pd.Series:
-    lo, hi = series.min(), series.max()
-    if hi == lo:
-        return pd.Series([50.0] * len(series), index=series.index)
-    return (series - lo) / (hi - lo) * 100
+    return sector_flow.load_sector_data()
 
 
 def compute_sector_scores(df: pd.DataFrame, inst_col: str, momentum_col: str) -> pd.DataFrame:
-    valid = df.dropna(subset=[inst_col, momentum_col])
-    sector_df = valid.groupby("industry").agg(
-        inst_strength=(inst_col, "sum"),
-        momentum=(momentum_col, "mean"),
-        stock_count=("stock_id", "count"),
-    ).reset_index()
-
-    sector_df["norm_inst"] = minmax_normalize(sector_df["inst_strength"])
-    sector_df["norm_momentum"] = minmax_normalize(sector_df["momentum"])
-    sector_df["rotation_score"] = sector_df["norm_inst"] * 0.8 + sector_df["norm_momentum"] * 0.2
-    sector_df = sector_df.sort_values("rotation_score", ascending=False).reset_index(drop=True)
-    return sector_df
+    """
+    這裡沿用「語言選定後的 industry 欄位」分組（跟畫面顯示語言連動），
+    跟 decision_engine 固定用中文分組（industry_zh）是同一套計算公式，
+    只是分組欄位不同，數字不會對不上。
+    """
+    return sector_flow.compute_sector_scores(df, inst_col, momentum_col, group_col="industry")
 
 
 st.set_page_config(page_title=t("title"), layout="wide")
@@ -207,8 +160,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-if "lang" not in st.session_state:
-    st.session_state["lang"] = "zh"
+i18n.init_language()
 
 st.title(t("title"))
 
@@ -221,7 +173,7 @@ if not df.empty:
     latest_date = pd.to_datetime(df["date"]).max().strftime("%Y/%m/%d")
     st.caption(t("data_updated", date=latest_date))
 
-lang = st.session_state.get("lang", "zh")
+lang = i18n.get_lang()
 df["industry"] = df["industry_en"] if lang == "en" else df["industry_zh"]
 
 if df.empty or len(df["industry"].unique()) < 2:
@@ -272,7 +224,7 @@ selected_period = st.radio(
 color_col = {"3d": "momentum_3d", "10d": "momentum_10d", "1m": "momentum_20d", "1q": "momentum_60d"}[selected_period]
 st.caption(t("treemap_caption"))
 
-lang = st.session_state.get("lang", "zh")
+lang = i18n.get_lang()
 name_col = "name_zh" if lang == "zh" else "name_en"
 df["label"] = df["stock_id"] + "  " + df[name_col].fillna("")
 
