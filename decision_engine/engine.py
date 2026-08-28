@@ -38,6 +38,7 @@ class StockDecision:
     name: str
     stock_score: float
     signal: str
+    name_en: str | None = None  # 英文名稱，供頁面依語言切換顯示（decision_engine 本身不判斷語言）
     entry_score: float | None = None
     rr_ratio: float | None = None
     entry_zone: tuple[float, float] | None = None

@@ -142,6 +142,7 @@ def load_stock_info(stock_ids: list[str]) -> pd.DataFrame:
     c = COLUMNS["stock_info"]
     sql = f"""
         select {c['stock_id']} as stock_id, {c['name_zh']} as name_zh,
+               {c['name_en']} as name_en,
                {c['sector_zh']} as sector_zh
         from {c['table']}
         where {c['stock_id']} = any(:ids)

@@ -13,6 +13,7 @@ import numpy as np
 
 from watchlist import WATCHLIST  # 專案既有的觀察池清單（單一來源）
 from . import db, scoring, engine
+import sector_flow
 
 
 def _compute_sub_scores(stock_hist: pd.DataFrame, indicators_row: pd.Series,
@@ -45,9 +46,13 @@ def _compute_sub_scores(stock_hist: pd.DataFrame, indicators_row: pd.Series,
 
 def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> pd.DataFrame:
     """
-    sector_rank_lookup: {sector_zh: rank_pct(0~1)}，由 sector_heatmap.py 的排名邏輯提供。
-    若未提供則全部視為中位數（0.5），僅供沒接上熱力圖排名時先跑得動。
+    sector_rank_lookup: {sector_zh: rank_pct(0~1)}，由 sector_flow.py 的排名邏輯提供
+    （跟 pages/sector_heatmap.py 共用同一套算法，數字不會對不上）。
+    未傳入時，自動呼叫 sector_flow.get_sector_rank_lookup() 取得近10日的真實排名。
     """
+    if sector_rank_lookup is None:
+        sector_rank_lookup = sector_flow.get_sector_rank_lookup(window="10d")
+
     stock_ids = list(WATCHLIST)
     price_hist = db.load_price_history(stock_ids, lookback_days=90)
     indicators = db.load_latest_indicators(stock_ids).set_index("stock_id")
@@ -67,6 +72,7 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
 
         ind_row = indicators.loc[stock_id]
         name = info.loc[stock_id, "name_zh"] if stock_id in info.index else stock_id
+        name_en = info.loc[stock_id, "name_en"] if stock_id in info.index else stock_id
         sector = info.loc[stock_id, "sector_zh"] if stock_id in info.index else None
         sector_rank_pct = (
             sector_rank_lookup.get(sector, 0.5) if sector_rank_lookup and sector else 0.5
@@ -98,6 +104,7 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
             institutional_ok=bool(institutional_ok),
             is_false_breakout=is_false_breakout,
         )
+        decision.name_en = name_en
         results.append(decision)
 
     return results
