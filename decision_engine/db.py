@@ -115,8 +115,12 @@ def _query_df(sql: str, params: dict) -> pd.DataFrame:
         columns = list(result.keys())
     df = pd.DataFrame(rows, columns=columns)
 
+    # 效能優化：同一個資料庫欄位的型別必然一致，只需要檢查每欄「第一個非空值」
+    # 是不是 Decimal，不用逐一掃描整欄——資料量大時（例如163檔股票×90天）
+    # 這個差異很明顯（O(1) vs O(n) per 欄位）
     for col in df.columns:
-        if df[col].apply(lambda v: isinstance(v, Decimal)).any():
+        sample = df[col].dropna()
+        if not sample.empty and isinstance(sample.iloc[0], Decimal):
             df[col] = df[col].astype(float)
 
     return df
@@ -177,9 +181,9 @@ def load_stock_info(stock_ids: list[str]) -> pd.DataFrame:
 
 
 def load_eps_quarterly(stock_ids: list[str]) -> pd.DataFrame:
-    """撈取觀察池股票的季度累計EPS，供估值檢查（本益比）使用。"""
+    """撈取觀察池股票的季度累計財報資料（EPS、毛利、營業成本），供估值與毛利率趨勢判斷使用。"""
     sql = """
-        select stock_id, date, eps_cumulative
+        select stock_id, date, eps_cumulative, gross_profit, cost_of_goods_sold
         from raw.eps_quarterly
         where stock_id = any(:ids)
         order by stock_id, date

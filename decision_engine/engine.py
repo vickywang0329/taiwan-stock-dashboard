@@ -20,8 +20,6 @@ from . import scoring, zones, risk_reward
 THRESHOLDS = {
     "avoid_below": 65,
     "watch_below": 85,
-    "entry_score_min": 80,
-    "rr_ratio_min": 2.5,
 }
 
 SIGNAL_LABELS = {
@@ -39,11 +37,10 @@ class StockDecision:
     stock_score: float
     signal: str
     name_en: str | None = None  # 英文名稱，供頁面依語言切換顯示（decision_engine 本身不判斷語言）
-    entry_score: float | None = None
-    rr_ratio: float | None = None
     entry_zone: tuple[float, float] | None = None
     pullback_zones: dict | None = None
     pullback_position: str | None = None  # 現價實際落在哪個回檔位置，見 zones.classify_pullback_position()
+    fair_value_estimate: float | None = None  # 依基本面估算的合理價格＝估算全年EPS×產業同業本益比基準
     stop_loss: float | None = None
     target: float | None = None
     current_price: float | None = None
@@ -87,10 +84,28 @@ def decide(
     sub_scores: dict,
     institutional_ok: bool,
     is_false_breakout: bool,
+    is_overvalued: bool = False,
+    fair_value_estimate: float | None = None,
+    eps_growing: bool = True,
 ) -> StockDecision:
     """
     單一股票的完整決策流程。
     high_20d / low_20d 為「近20個交易日不含當日」的序列，用來算突破價與停損。
+
+    BUY_NOW 判斷邏輯（已與使用者確認定案，拿掉風險報酬比門檻——2倍風險目標價公式
+    數學上永遠不可能超過2.0，而門檻卻設2.5，兩者矛盾，故改用清楚的布林條件，
+    entry_score/rr_ratio 因不再影響訊號判斷，已完全移除，不再計算）：
+
+        BUY_NOW ⟺ stock_score>=85
+                  AND NOT is_overvalued        （估值合理：本益比 <= 同業基準 x 1.5）
+                  AND breakout_ok               （技術面：收盤價 >= 突破價）
+                  AND bias_ok                   （技術面：乖離幅度合理，未追高）
+                  AND institutional_ok          （籌碼面：近3日法人合計買超為正）
+                  AND eps_growing               （基本面：估算全年EPS優於去年全年EPS）
+
+    is_overvalued：本益比是否明顯偏離同業基準（> 1.5倍）。
+    eps_growing：估算全年EPS 是否較去年全年EPS 成長。
+    fair_value_estimate：依基本面估算的合理價格，直接附在結果上供頁面顯示。
     """
     stock_score = scoring.compute_stock_score(sub_scores)
 
@@ -101,6 +116,7 @@ def decide(
             stock_score=stock_score,
             signal="AVOID",
             current_price=close,
+            fair_value_estimate=fair_value_estimate,
             exclude_reason=_exclude_reason_for_avoid(close, ma60, is_false_breakout),
         )
 
@@ -114,20 +130,22 @@ def decide(
             stock_score=stock_score,
             signal="WATCH",
             current_price=close,
+            fair_value_estimate=fair_value_estimate,
             missing_conditions=_missing_conditions_for_watch(sub_scores, institutional_ok, breakout_ok),
         )
 
-    # stock_score >= 85：算進場分數、風險報酬比、乖離幅度
-    entry_score = scoring.compute_entry_score(close, breakout_price, atr14)
+    # stock_score >= 85：判斷 BUY_NOW 五項條件（entry_score/rr_ratio 已於
+    # 使用者確認後移除，不再計算——原因見上方函式說明的數學矛盾）
     stop_loss = risk_reward.compute_stop_loss(low_20d)
     target = risk_reward.compute_target(close, stop_loss, prior_swing_high)
-    rr_ratio = risk_reward.compute_rr_ratio(close, stop_loss, target)
     bias_ok = scoring.bias_ok(close, breakout_price, atr14)
 
     all_ok = (
-        entry_score >= THRESHOLDS["entry_score_min"]
-        and rr_ratio >= THRESHOLDS["rr_ratio_min"]
+        not is_overvalued
+        and breakout_ok
         and bias_ok
+        and institutional_ok
+        and eps_growing
     )
 
     if all_ok:
@@ -137,9 +155,8 @@ def decide(
             name=name,
             stock_score=stock_score,
             signal="BUY_NOW",
-            entry_score=entry_score,
-            rr_ratio=rr_ratio,
             entry_zone=entry_zone,
+            fair_value_estimate=fair_value_estimate,
             stop_loss=stop_loss,
             target=target,
             current_price=close,
@@ -152,10 +169,9 @@ def decide(
             name=name,
             stock_score=stock_score,
             signal="BUY_PULLBACK",
-            entry_score=entry_score,
-            rr_ratio=rr_ratio,
             pullback_zones=pullback,
             pullback_position=pullback_position,
+            fair_value_estimate=fair_value_estimate,
             stop_loss=stop_loss,
             target=target,
             current_price=close,

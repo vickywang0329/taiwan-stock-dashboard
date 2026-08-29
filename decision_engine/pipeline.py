@@ -18,7 +18,7 @@ import sector_flow
 
 def _compute_sub_scores(stock_hist: pd.DataFrame, indicators_row: pd.Series,
                          benchmark_return: float, sector_rank_pct: float,
-                         val_score: float) -> dict:
+                         val_score: float, margin_score: float) -> dict:
     close = stock_hist["close"].iloc[-1]
     stock_return = close / stock_hist["close"].iloc[0] - 1
 
@@ -43,6 +43,7 @@ def _compute_sub_scores(stock_hist: pd.DataFrame, indicators_row: pd.Series,
         ),
         "sector_flow": scoring.sector_flow_score(sector_rank_pct),
         "valuation": val_score,
+        "margin_trend": margin_score,
     }
 
 
@@ -61,8 +62,15 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
     info = db.load_stock_info(stock_ids).set_index("stock_id")
     eps_raw = db.load_eps_quarterly(stock_ids)
 
+    # ---- 效能優化：先依股票代碼分組一次，後面對每檔股票就是 O(1) 查表，
+    #      不用每次都對整份 90天×163檔 的價格表重新做一次線性掃描。
+    #      這個分組動作，原本在下面的迴圈裡對每檔股票各做了2次（前置計算
+    #      一次、正式判斷一次），163檔×2=326次線性掃描，改成這樣只掃描一次。----
+    price_hist_by_stock = {sid: g.sort_values("date") for sid, g in price_hist.groupby("stock_id")}
+    eps_by_stock = {sid: g for sid, g in eps_raw.groupby("stock_id")} if not eps_raw.empty else {}
+
     benchmark_id = db.COLUMNS["benchmark_stock_id"]
-    bm_hist = price_hist[price_hist["stock_id"] == benchmark_id].sort_values("date")
+    bm_hist = price_hist_by_stock.get(benchmark_id, pd.DataFrame())
     benchmark_return = (
         bm_hist["close"].iloc[-1] / bm_hist["close"].iloc[0] - 1 if len(bm_hist) > 1 else 0.0
     )
@@ -70,13 +78,17 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
     # ---- 預先算好「全體股票」的本益比，才能建立同產業基準（缺一不可，
     #      同業基準需要看過整個觀察池才算得出來，不能逐股計算時各算各的）----
     pe_records = []
+    estimate_lookup = {}
+    last_year_fy_eps_lookup = {}
     for stock_id in stock_ids:
-        hist = price_hist[price_hist["stock_id"] == stock_id].sort_values("date")
-        if hist.empty or stock_id not in info.index:
+        hist = price_hist_by_stock.get(stock_id)
+        if hist is None or hist.empty or stock_id not in info.index:
             continue
         close = float(hist["close"].iloc[-1])
-        stock_eps_df = eps_raw[eps_raw["stock_id"] == stock_id]
+        stock_eps_df = eps_by_stock.get(stock_id, pd.DataFrame())
         estimate, _method = valuation.estimate_annual_eps(stock_eps_df)
+        estimate_lookup[stock_id] = estimate
+        last_year_fy_eps_lookup[stock_id] = valuation.get_last_year_full_year_eps(stock_eps_df)
         pe = valuation.compute_pe(close, estimate)
         if pe is not None:
             pe_records.append({"stock_id": stock_id, "industry": info.loc[stock_id, "sector_zh"], "pe": pe})
@@ -89,9 +101,10 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
 
     results = []
     for stock_id in stock_ids:
-        hist = price_hist[price_hist["stock_id"] == stock_id].sort_values("date")
-        if len(hist) < 25 or stock_id not in indicators.index:
+        hist = price_hist_by_stock.get(stock_id)
+        if hist is None or len(hist) < 25 or stock_id not in indicators.index:
             continue  # 資料不足先跳過
+
 
         ind_row = indicators.loc[stock_id]
         name = info.loc[stock_id, "name_zh"] if stock_id in info.index else stock_id
@@ -104,8 +117,21 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
         stock_pe = pe_lookup.get(stock_id)
         industry_avg_pe = industry_pe_benchmark.get(sector)
         val_score = valuation.valuation_score(stock_pe, industry_avg_pe)
+        overvalued = valuation.is_overvalued(stock_pe, industry_avg_pe)
 
-        sub_scores = _compute_sub_scores(hist, ind_row, benchmark_return, sector_rank_pct, val_score)
+        # 合理價格 = 估算全年EPS × 產業同業本益比基準
+        stock_estimate = estimate_lookup.get(stock_id)
+        fair_value = (
+            stock_estimate * industry_avg_pe
+            if stock_estimate is not None and industry_avg_pe is not None
+            else None
+        )
+
+        growing = valuation.eps_growing(stock_estimate, last_year_fy_eps_lookup.get(stock_id))
+        stock_financials_df = eps_raw[eps_raw["stock_id"] == stock_id]
+        margin_score = valuation.margin_trend_score(stock_financials_df)
+
+        sub_scores = _compute_sub_scores(hist, ind_row, benchmark_return, sector_rank_pct, val_score, margin_score)
 
         close = hist["close"].iloc[-1]
         high_20d = hist["high"].iloc[-21:-1]  # 不含當日
@@ -130,6 +156,9 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
             sub_scores=sub_scores,
             institutional_ok=bool(institutional_ok),
             is_false_breakout=is_false_breakout,
+            is_overvalued=overvalued,
+            fair_value_estimate=fair_value,
+            eps_growing=growing,
         )
         decision.name_en = name_en
         results.append(decision)

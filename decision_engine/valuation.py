@@ -94,6 +94,34 @@ def compute_pe(current_price: float, estimated_annual_eps: float | None) -> floa
     return current_price / estimated_annual_eps
 
 
+def get_last_year_full_year_eps(stock_eps_df: pd.DataFrame, today: pd.Timestamp | None = None) -> float | None:
+    """取得「去年全年（Q4累計）EPS」，供判斷今年估算EPS是否較去年成長使用。"""
+    if today is None:
+        today = pd.Timestamp.today()
+    if stock_eps_df.empty:
+        return None
+
+    df = stock_eps_df.copy()
+    df["year"] = df["date"].dt.year
+    df["quarter"] = df["date"].apply(_quarter_of)
+
+    last_year = today.year - 1
+    fy_last = df[(df["year"] == last_year) & (df["quarter"] == 4)]
+    if fy_last.empty:
+        return None
+    return float(fy_last.iloc[0]["eps_cumulative"])
+
+
+def eps_growing(estimated_annual_eps: float | None, last_year_full_year_eps: float | None) -> bool:
+    """
+    今年估算全年EPS 是否較去年全年EPS 成長。
+    缺資料時預設為 True（不因資料缺漏而卡關，跟 valuation 的中性原則一致）。
+    """
+    if estimated_annual_eps is None or last_year_full_year_eps is None:
+        return True
+    return estimated_annual_eps > last_year_full_year_eps
+
+
 def compute_industry_pe_benchmark(pe_by_industry: pd.DataFrame) -> dict[str, float]:
     """
     pe_by_industry 需含 industry、pe 兩欄（每檔股票一列）。
@@ -115,7 +143,80 @@ def compute_industry_pe_benchmark(pe_by_industry: pd.DataFrame) -> dict[str, flo
     return result
 
 
-def valuation_score(pe: float | None, industry_avg_pe: float | None, threshold_multiple: float = 1.5) -> float:
+def get_gross_margin_at(stock_financials_df: pd.DataFrame, year: int, quarter: int) -> float | None:
+    """取得指定年度、季度（累計）的毛利率。營收用 毛利+營業成本 反推，避免猜測FinMind營收欄位名稱。"""
+    if stock_financials_df.empty:
+        return None
+    df = stock_financials_df.copy()
+    df["fyear"] = df["date"].dt.year
+    df["fquarter"] = df["date"].apply(_quarter_of)
+    row = df[(df["fyear"] == year) & (df["fquarter"] == quarter)]
+    if row.empty:
+        return None
+
+    gp = row.iloc[0].get("gross_profit")
+    cogs = row.iloc[0].get("cost_of_goods_sold")
+    if gp is None or cogs is None or pd.isna(gp) or pd.isna(cogs):
+        return None
+
+    revenue = gp + cogs  # 會計恆等式：營收 = 毛利 + 營業成本
+    if revenue == 0:
+        return None
+    return gp / revenue
+
+
+def _find_latest_available_quarter(stock_financials_df: pd.DataFrame, today: pd.Timestamp) -> tuple[int, int] | None:
+    """找出「今年」最新一筆有毛利/成本資料的季度，回傳 (year, quarter)，找不到回傳 None。"""
+    if stock_financials_df.empty:
+        return None
+    df = stock_financials_df.dropna(subset=["gross_profit", "cost_of_goods_sold"])
+    if df.empty:
+        return None
+    df = df.copy()
+    df["fyear"] = df["date"].dt.year
+    df["fquarter"] = df["date"].apply(_quarter_of)
+    this_year_rows = df[df["fyear"] == today.year]
+    if this_year_rows.empty:
+        return None
+    latest = this_year_rows.sort_values("date").iloc[-1]
+    return int(latest["fyear"]), int(latest["fquarter"])
+
+
+MARGIN_SENSITIVITY = 2.0  # ⚠️ 初始假設，之後用回測校準
+
+
+def margin_trend_score(stock_financials_df: pd.DataFrame, today: pd.Timestamp | None = None) -> float:
+    """
+    毛利率趨勢分數（漸進式 0-100，不是硬指標）：
+    拿「今年最新一期累計毛利率」跟「去年同一期累計毛利率」比較（同期比同期），
+    用 S 型函數把變化幅度（百分點）映射成分數：
+    - 毛利率持平（變化=0） → 50分（中性）
+    - 毛利率上升越多 → 分數越接近100
+    - 毛利率下降越多 → 分數越接近0
+    缺資料時回傳中性 50 分。
+    """
+    if today is None:
+        today = pd.Timestamp.today()
+
+    latest_period = _find_latest_available_quarter(stock_financials_df, today)
+    if latest_period is None:
+        return 50.0
+    year, quarter = latest_period
+
+    margin_this = get_gross_margin_at(stock_financials_df, year, quarter)
+    margin_last = get_gross_margin_at(stock_financials_df, year - 1, quarter)
+    if margin_this is None or margin_last is None:
+        return 50.0
+
+    change_pct_points = (margin_this - margin_last) * 100
+    score = 100 / (1 + np.exp(-change_pct_points / MARGIN_SENSITIVITY))
+    return float(np.clip(score, 0, 100))
+
+
+OVERVALUATION_THRESHOLD = 1.5  # ⚠️ 初始假設，之後用回測校準
+
+
+def valuation_score(pe: float | None, industry_avg_pe: float | None, threshold_multiple: float = OVERVALUATION_THRESHOLD) -> float:
     """
     估值子分數（門檻式，不是漸進分數）：
     - 缺資料（PE 或同業基準算不出來）→ 給滿分（不因資料缺漏而扣分，保持中性）
@@ -125,3 +226,13 @@ def valuation_score(pe: float | None, industry_avg_pe: float | None, threshold_m
     if pe is None or industry_avg_pe is None or industry_avg_pe <= 0:
         return 100.0
     return 100.0 if pe <= industry_avg_pe * threshold_multiple else 0.0
+
+
+def is_overvalued(pe: float | None, industry_avg_pe: float | None, threshold_multiple: float = OVERVALUATION_THRESHOLD) -> bool:
+    """
+    布林版本，供 Decision Engine 判斷是否要強制排除 BUY_NOW（即使其他各項條件都達標）。
+    缺資料時視為「不算過虛」（不強制排除），跟 valuation_score 的中性原則一致。
+    """
+    if pe is None or industry_avg_pe is None or industry_avg_pe <= 0:
+        return False
+    return pe > industry_avg_pe * threshold_multiple
