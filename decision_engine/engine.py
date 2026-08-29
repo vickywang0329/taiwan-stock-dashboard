@@ -43,6 +43,7 @@ class StockDecision:
     rr_ratio: float | None = None
     entry_zone: tuple[float, float] | None = None
     pullback_zones: dict | None = None
+    pullback_position: str | None = None  # 現價實際落在哪個回檔位置，見 zones.classify_pullback_position()
     stop_loss: float | None = None
     target: float | None = None
     current_price: float | None = None
@@ -145,6 +146,7 @@ def decide(
         )
     else:
         pullback = zones.compute_pullback_zones(breakout_price, atr14)
+        pullback_position = zones.classify_pullback_position(close, pullback)
         return StockDecision(
             stock_id=stock_id,
             name=name,
@@ -153,6 +155,7 @@ def decide(
             entry_score=entry_score,
             rr_ratio=rr_ratio,
             pullback_zones=pullback,
+            pullback_position=pullback_position,
             stop_loss=stop_loss,
             target=target,
             current_price=close,

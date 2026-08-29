@@ -51,3 +51,27 @@ def compute_pullback_zones(breakout_price: float, atr14: float) -> dict:
         "zone1": (round(zone1_low, 2), round(zone1_high, 2)),
         "zone2": (round(zone2_low, 2), round(zone2_high, 2)),
     }
+
+
+def classify_pullback_position(current_price: float, pullback_zones: dict) -> str:
+    """
+    拿「現價」去比對 Zone1/Zone2，判斷現在實際處於哪個狀態，
+    給出可以直接行動的結論，而不是只丟兩個區間數字讓使用者自己比對。
+
+    回傳四種狀態之一：
+    - "above_zone1"：現價還高於 Zone1 上緣，還沒回檔到位，繼續等待
+    - "in_zone1"：現價落在 Zone1 範圍內，可以小幅布局
+    - "in_zone2"：現價落在 Zone2 範圍內，可以大幅買進
+    - "below_zone2"：現價已經跌破 Zone2 下緣，代表跌破原本設定的回檔支撐，
+      這種情況不建議依原計畫進場，應該重新評估（可能代表趨勢已轉弱）
+    """
+    z1_low, z1_high = pullback_zones["zone1"]
+    z2_low, z2_high = pullback_zones["zone2"]
+
+    if current_price > z1_high:
+        return "above_zone1"
+    if z1_low <= current_price <= z1_high:
+        return "in_zone1"
+    if z2_low <= current_price < z1_low:
+        return "in_zone2"
+    return "below_zone2"
