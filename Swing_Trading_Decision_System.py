@@ -34,6 +34,11 @@ TEXT = {
     "col_stop_target": {"zh": "停損 / 目標", "en": "Stop / Target"},
     "col_current_price": {"zh": "現價", "en": "Current price"},
     "col_zones": {"zh": "小幅布局 / 大幅買進", "en": "Small position / Full position"},
+    "col_position_status": {"zh": "目前狀態", "en": "Current status"},
+    "status_above_zone1": {"zh": "尚未回檔至位，繼續等待", "en": "Not pulled back yet — keep waiting"},
+    "status_in_zone1": {"zh": "現價位於小幅布局區，可小幅布局", "en": "Price is in the small-position zone — consider a small position"},
+    "status_in_zone2": {"zh": "現價位於大幅買進區，可大幅買進", "en": "Price is in the full-position zone — consider a full position"},
+    "status_below_zone2": {"zh": "已跌破設定支撐，建議重新評估", "en": "Price broke below support — re-evaluate"},
     "col_missing": {"zh": "尚缺條件", "en": "Missing conditions"},
     "col_exclude_reason": {"zh": "剔除原因", "en": "Exclusion reason"},
 
@@ -173,10 +178,17 @@ st.markdown("---")
 # ---- BUY_PULLBACK：等回檔 ----
 render_badge(t("signal_pullback"), "pullback", len(buy_pullback))
 if buy_pullback:
+    STATUS_LABELS = {
+        "above_zone1": t("status_above_zone1"),
+        "in_zone1": t("status_in_zone1"),
+        "in_zone2": t("status_in_zone2"),
+        "below_zone2": t("status_below_zone2"),
+    }
     rows = [{
         t("col_stock"): get_name(d),
         t("col_stock_score"): d.stock_score,
         t("col_current_price"): format_price(d.current_price),
+        t("col_position_status"): STATUS_LABELS.get(d.pullback_position, "-"),
         t("col_zones"): (
             f"{format_range(d.pullback_zones['zone1'])} / {format_range(d.pullback_zones['zone2'])}"
             if d.pullback_zones else "-"
