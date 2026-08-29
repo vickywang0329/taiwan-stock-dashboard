@@ -11,15 +11,18 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .valuation import valuation_score  # noqa: F401  重新匯出，pipeline.py 統一從 scoring 呼叫
+
 # ---------------------------------------------------------------------------
 # 股票分數權重（滿分 100，五個子分數各自 0-100 後加權平均）
 # ---------------------------------------------------------------------------
 WEIGHTS = {
-    "trend": 0.25,          # 技術趨勢：站上 MA5/20/60 且多頭排列
-    "momentum": 0.20,       # 動能：RSI14、MACD 柱狀圖
-    "relative_strength": 0.20,  # 相對強度：對大盤/0050 的超額報酬
-    "institutional_flow": 0.20,  # 個股法人動向：近N日法人買賣超
-    "sector_flow": 0.15,    # 產業資金流向：重用熱力圖的法人排名邏輯
+    "trend": 0.225,          # 技術趨勢：站上 MA5/20/60 且多頭排列
+    "momentum": 0.18,        # 動能：RSI14、MACD 柱狀圖
+    "relative_strength": 0.18,  # 相對強度：對大盤/0050 的超額報酬
+    "institutional_flow": 0.18,  # 個股法人動向：近N日法人買賣超
+    "sector_flow": 0.135,    # 產業資金流向：重用熱力圖的法人排名邏輯
+    "valuation": 0.10,       # 估值：本益比是否明顯偏離同業（見 valuation.py）
 }
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-9
 

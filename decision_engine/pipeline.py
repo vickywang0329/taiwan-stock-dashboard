@@ -12,12 +12,13 @@ import pandas as pd
 import numpy as np
 
 from watchlist import WATCHLIST  # 專案既有的觀察池清單（單一來源）
-from . import db, scoring, engine
+from . import db, scoring, engine, valuation
 import sector_flow
 
 
 def _compute_sub_scores(stock_hist: pd.DataFrame, indicators_row: pd.Series,
-                         benchmark_return: float, sector_rank_pct: float) -> dict:
+                         benchmark_return: float, sector_rank_pct: float,
+                         val_score: float) -> dict:
     close = stock_hist["close"].iloc[-1]
     stock_return = close / stock_hist["close"].iloc[0] - 1
 
@@ -41,6 +42,7 @@ def _compute_sub_scores(stock_hist: pd.DataFrame, indicators_row: pd.Series,
             int(net_buy_days), int(total_days), bool(net_trend_up)
         ),
         "sector_flow": scoring.sector_flow_score(sector_rank_pct),
+        "valuation": val_score,
     }
 
 
@@ -57,12 +59,33 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
     price_hist = db.load_price_history(stock_ids, lookback_days=90)
     indicators = db.load_latest_indicators(stock_ids).set_index("stock_id")
     info = db.load_stock_info(stock_ids).set_index("stock_id")
+    eps_raw = db.load_eps_quarterly(stock_ids)
 
     benchmark_id = db.COLUMNS["benchmark_stock_id"]
     bm_hist = price_hist[price_hist["stock_id"] == benchmark_id].sort_values("date")
     benchmark_return = (
         bm_hist["close"].iloc[-1] / bm_hist["close"].iloc[0] - 1 if len(bm_hist) > 1 else 0.0
     )
+
+    # ---- 預先算好「全體股票」的本益比，才能建立同產業基準（缺一不可，
+    #      同業基準需要看過整個觀察池才算得出來，不能逐股計算時各算各的）----
+    pe_records = []
+    for stock_id in stock_ids:
+        hist = price_hist[price_hist["stock_id"] == stock_id].sort_values("date")
+        if hist.empty or stock_id not in info.index:
+            continue
+        close = float(hist["close"].iloc[-1])
+        stock_eps_df = eps_raw[eps_raw["stock_id"] == stock_id]
+        estimate, _method = valuation.estimate_annual_eps(stock_eps_df)
+        pe = valuation.compute_pe(close, estimate)
+        if pe is not None:
+            pe_records.append({"stock_id": stock_id, "industry": info.loc[stock_id, "sector_zh"], "pe": pe})
+
+    pe_df = pd.DataFrame(pe_records)
+    industry_pe_benchmark = (
+        valuation.compute_industry_pe_benchmark(pe_df) if not pe_df.empty else {}
+    )
+    pe_lookup = dict(zip(pe_df["stock_id"], pe_df["pe"])) if not pe_df.empty else {}
 
     results = []
     for stock_id in stock_ids:
@@ -78,7 +101,11 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
             sector_rank_lookup.get(sector, 0.5) if sector_rank_lookup and sector else 0.5
         )
 
-        sub_scores = _compute_sub_scores(hist, ind_row, benchmark_return, sector_rank_pct)
+        stock_pe = pe_lookup.get(stock_id)
+        industry_avg_pe = industry_pe_benchmark.get(sector)
+        val_score = valuation.valuation_score(stock_pe, industry_avg_pe)
+
+        sub_scores = _compute_sub_scores(hist, ind_row, benchmark_return, sector_rank_pct, val_score)
 
         close = hist["close"].iloc[-1]
         high_20d = hist["high"].iloc[-21:-1]  # 不含當日

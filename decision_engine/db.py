@@ -6,10 +6,10 @@ decision_engine/db.py
 已對照專案真實 schema 修正 COLUMNS 字典（staging.daily_master /
 mart.technical_indicators / raw.stock_info）。
 """
-from decimal import Decimal
 from __future__ import annotations
 import os
 from contextlib import contextmanager
+from decimal import Decimal
 from urllib.parse import quote_plus
 
 import pandas as pd
@@ -102,6 +102,12 @@ def _query_df(sql: str, params: dict) -> pd.DataFrame:
     pd.read_sql() 對 text() 物件的判斷有相容性問題，即使正確用 text()
     包裝，仍可能誤走到不支援具名參數的路徑，導致 ":ids" 這種語法
     直接被送進資料庫報錯。改用這個函式可以完全繞開該問題。
+
+    ⚠️ 副作用：手動組 DataFrame 沒有 pd.read_sql() 自動把資料庫的
+    NUMERIC 型別轉成 float 的機制，PostgreSQL 的數字欄位在這裡會被
+    psycopg2 讀成 Python 原生的 decimal.Decimal，跟 float 混合運算
+    會直接報錯（TypeError），所以這裡補一段：只要欄位裡出現過
+    Decimal，就把整欄位轉成 float。
     """
     with get_conn() as conn:
         result = conn.execute(text(sql), params)
@@ -168,3 +174,16 @@ def load_stock_info(stock_ids: list[str]) -> pd.DataFrame:
         where {c['stock_id']} = any(:ids)
     """
     return _query_df(sql, {"ids": stock_ids})
+
+
+def load_eps_quarterly(stock_ids: list[str]) -> pd.DataFrame:
+    """撈取觀察池股票的季度累計EPS，供估值檢查（本益比）使用。"""
+    sql = """
+        select stock_id, date, eps_cumulative
+        from raw.eps_quarterly
+        where stock_id = any(:ids)
+        order by stock_id, date
+    """
+    df = _query_df(sql, {"ids": stock_ids})
+    df["date"] = pd.to_datetime(df["date"])
+    return df
