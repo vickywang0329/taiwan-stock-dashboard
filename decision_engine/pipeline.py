@@ -79,6 +79,7 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
     #      同業基準需要看過整個觀察池才算得出來，不能逐股計算時各算各的）----
     pe_records = []
     estimate_lookup = {}
+    is_loss_lookup = {}
     last_year_fy_eps_lookup = {}
     for stock_id in stock_ids:
         hist = price_hist_by_stock.get(stock_id)
@@ -86,8 +87,9 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
             continue
         close = float(hist["close"].iloc[-1])
         stock_eps_df = eps_by_stock.get(stock_id, pd.DataFrame())
-        estimate, _method = valuation.estimate_annual_eps(stock_eps_df)
+        estimate, method = valuation.estimate_annual_eps(stock_eps_df)
         estimate_lookup[stock_id] = estimate
+        is_loss_lookup[stock_id] = (method == "loss")
         last_year_fy_eps_lookup[stock_id] = valuation.get_last_year_full_year_eps(stock_eps_df)
         pe = valuation.compute_pe(close, estimate)
         if pe is not None:
@@ -116,14 +118,18 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
 
         stock_pe = pe_lookup.get(stock_id)
         industry_avg_pe = industry_pe_benchmark.get(sector)
-        val_score = valuation.valuation_score(stock_pe, industry_avg_pe)
-        overvalued = valuation.is_overvalued(stock_pe, industry_avg_pe)
+        stock_estimate = estimate_lookup.get(stock_id)
+        stock_is_loss = is_loss_lookup.get(stock_id, False)
+
+        val_score = valuation.valuation_score(stock_pe, industry_avg_pe, is_loss=stock_is_loss)
+        overvalued = valuation.is_overvalued(stock_pe, industry_avg_pe, is_loss=stock_is_loss)
 
         # 合理價格 = 估算全年EPS × 產業同業本益比基準
-        stock_estimate = estimate_lookup.get(stock_id)
+        # ⚠️ 要求 EPS 估算值必須是正值——虧損公司用本益比×EPS算「合理價格」
+        # 沒有意義（會算出負的價格），比照 compute_pe() 同樣的邏輯處理
         fair_value = (
             stock_estimate * industry_avg_pe
-            if stock_estimate is not None and industry_avg_pe is not None
+            if stock_estimate is not None and stock_estimate > 0 and industry_avg_pe is not None
             else None
         )
 
@@ -136,13 +142,31 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
         close = hist["close"].iloc[-1]
         high_20d = hist["high"].iloc[-21:-1]  # 不含當日
         low_20d = hist["low"].iloc[-21:]      # 含當日，用於停損
-        prior_swing_high = float(hist["high"].tail(60).max())
+        # ⚠️ 原本設計是「近60個交易日最高價」，這裡放寬成「抓得到的完整
+        # 歷史範圍」（不含當日）——原因：對「今天真的創新高、一口氣衝過去
+        # 近期所有價位」這種最強勢的突破情境，60日這個窄窗口反而容易找不到
+        # 比今天更高的歷史壓力區，導致目標價低於進場價、算出負的風險報酬比，
+        # 造成「明明是最強勢的突破，卻顯示報酬是負的」這種矛盾的顯示結果。
+        # 放寬範圍能降低（但無法完全避免）這種情況發生的機率。
+        prior_swing_high = (
+            float(hist["high"].iloc[:-1].max()) if len(hist) >= 2
+            else float(hist["high"].iloc[-1])
+        )
         institutional_ok = hist["institutional_net"].tail(3).sum() > 0
         # 假突破：曾經站上近20日高點但收盤又跌破，簡化判斷，之後可再細修
         is_false_breakout = bool(
             (hist["close"].iloc[-2] >= hist["high"].iloc[-22:-2].max())
             and (close < hist["close"].iloc[-2])
         ) if len(hist) >= 22 else False
+
+        # 型態分類需要的三項額外資料
+        today_low = float(hist["low"].iloc[-1])
+        avg_volume_20d = hist["volume"].tail(20).mean()
+        volume_ratio = (
+            float(hist["volume"].iloc[-1] / avg_volume_20d)
+            if avg_volume_20d and avg_volume_20d > 0 else None
+        )
+        ma20_val = float(ind_row["ma20"]) if pd.notna(ind_row["ma20"]) else None
 
         decision = engine.decide(
             stock_id=stock_id,
@@ -159,6 +183,9 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
             is_overvalued=overvalued,
             fair_value_estimate=fair_value,
             eps_growing=growing,
+            ma20=ma20_val,
+            volume_ratio=volume_ratio,
+            today_low=today_low,
         )
         decision.name_en = name_en
         results.append(decision)

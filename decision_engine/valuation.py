@@ -5,10 +5,16 @@ decision_engine/valuation.py
 
 ⚠️ 這裡的門檻（1.5倍同業平均）是初始假設，之後要用回測校準。
 
-計算邏輯（已與使用者確認定案）：
+⚠️ 2026/08 修正記錄：原本誤以為 raw.eps_quarterly.eps_cumulative 是台股慣例的
+「季累計數」，實際用大立光公開財報數字查證後發現，FinMind 這個欄位其實是「單季數」
+（例如 2024Q2 存的 33.70 元，正好對應大立光公開法說會公布的「單季EPS 33.7元」，
+不是「上半年累計 79.49元」）。原本的「還原單季」邏輯因此是對已經是單季的數字做了
+錯誤的二次處理，導致 EPS 估算值系統性偏低、本益比被嚴重高估。已改為直接加總。
+
+計算邏輯（已依正確資料格式修正）：
 1. 全年 EPS 估算，優先用「季節調整外推法」：
-   全年估算 = 今年H1累計EPS × (去年全年累計EPS ÷ 去年H1累計EPS)
-   （財報空窗期，今年H1資料還沒公布時）備援改用 TTM（近四季合計）
+   全年估算 = 今年上半年單季EPS加總 × (去年全年單季EPS加總 ÷ 去年上半年單季EPS加總)
+   （財報空窗期，今年上半年資料還沒公布齊全時）備援改用 TTM（近四季單季EPS直接加總）
 2. 本益比 = 現價 ÷ 估算全年EPS
 3. 同產業基準 = 同產業其他股票本益比，排除虧損股（PE<=0）與極端值後的平均
 4. 本益比 > 同業基準 × 1.5 倍 → 估值過虛（valuation 子分數不通過）
@@ -23,28 +29,17 @@ def _quarter_of(d: pd.Timestamp) -> int:
     return {3: 1, 6: 2, 9: 3, 12: 4}.get(d.month, 0)
 
 
-def decumulate_quarterly_eps(stock_eps_df: pd.DataFrame) -> pd.DataFrame:
+def _sum_standalone_eps(df: pd.DataFrame, year: int, quarters: list[int]) -> float | None:
     """
-    把台股財報慣例的「季累計EPS」，還原成「單季EPS」。
-    stock_eps_df 需含 date（季底日）、eps_cumulative，且是單一股票的資料。
-    Q1 本身就是單季（年度重新累計的起點）；Q2/Q3/Q4 要減去上一季的累計值，
-    遇到跨年度（從去年Q4銜接到今年Q1）不能相減，Q1 一律直接採用累計值本身。
+    加總指定年度、指定季度清單的單季EPS。
+    df 的 eps_cumulative 欄位實際存的是「單季EPS」（已查證，見模組說明），
+    要湊出「上半年」或「全年」，直接加總對應的單季數字即可，不需要還原。
+    只要缺任何一季，就回傳 None，避免用不完整的資料湊出錯誤結果。
     """
-    df = stock_eps_df.sort_values("date").reset_index(drop=True).copy()
-    df["year"] = df["date"].dt.year
-    df["quarter"] = df["date"].apply(_quarter_of)
-
-    standalone = []
-    prev_row = None
-    for _, row in df.iterrows():
-        if row["quarter"] == 1 or prev_row is None or prev_row["year"] != row["year"]:
-            standalone.append(row["eps_cumulative"])
-        else:
-            standalone.append(row["eps_cumulative"] - prev_row["eps_cumulative"])
-        prev_row = row
-
-    df["eps_standalone"] = standalone
-    return df
+    subset = df[(df["year"] == year) & (df["quarter"].isin(quarters))]
+    if len(subset) != len(quarters):
+        return None
+    return float(subset["eps_cumulative"].sum())
 
 
 def estimate_annual_eps(stock_eps_df: pd.DataFrame, today: pd.Timestamp | None = None) -> tuple[float | None, str]:
@@ -64,25 +59,51 @@ def estimate_annual_eps(stock_eps_df: pd.DataFrame, today: pd.Timestamp | None =
 
     this_year, last_year = today.year, today.year - 1
 
-    h1_this = df[(df["year"] == this_year) & (df["quarter"] == 2)]
-    h1_last = df[(df["year"] == last_year) & (df["quarter"] == 2)]
-    fy_last = df[(df["year"] == last_year) & (df["quarter"] == 4)]
+    h1_this_val = _sum_standalone_eps(df, this_year, [1, 2])
+    h1_last_val = _sum_standalone_eps(df, last_year, [1, 2])
+    fy_last_val = _sum_standalone_eps(df, last_year, [1, 2, 3, 4])
 
     # ---- 優先：季節調整外推法 ----
-    if not h1_this.empty and not h1_last.empty and not fy_last.empty:
-        h1_this_val = float(h1_this.iloc[0]["eps_cumulative"])
-        h1_last_val = float(h1_last.iloc[0]["eps_cumulative"])
-        fy_last_val = float(fy_last.iloc[0]["eps_cumulative"])
-        if h1_last_val != 0:
-            estimate = h1_this_val * (fy_last_val / h1_last_val)
-            return estimate, "extrapolation"
+    # ⚠️ 防呆：外推法的分母是「去年上半年EPS」，景氣循環股（如記憶體、PCB）
+    # 常有某一期接近打平甚至虧損的情況，這時候除法會爆炸或正負號顛倒，
+    # 算出離譜的合理價格（曾實測出現過負值、或十萬元等級的異常結果）。
+    # 這裡要求：① 去年上半年、去年全年都必須是正值獲利（不是打平或虧損）
+    #          ② 全年/上半年的比例要落在合理範圍內（0.5~5倍），
+    #             超出這個範圍代表分母過小、比例不可靠，一律改用 TTM 備援。
+    #          ③ 算出來的估算值本身也必須是正值——如果「今年上半年」本身
+    #             是虧損，即使去年基準正常，外推結果一樣會是負的，這種
+    #             情況在物理意義上（沒有負的股價）視為外推法不適用，改用TTM。
+    extrapolation_was_loss = False
+    if h1_this_val is not None and h1_last_val is not None and fy_last_val is not None:
+        if h1_last_val > 0 and fy_last_val > 0:
+            ratio = fy_last_val / h1_last_val
+            if 0.5 <= ratio <= 5.0:
+                estimate = h1_this_val * ratio
+                if estimate > 0:
+                    return estimate, "extrapolation"
+                extrapolation_was_loss = True  # 外推法算出虧損，記錄下來，仍繼續嘗試TTM
 
-    # ---- 備援：TTM（近四季合計，財報空窗期或去年H1為0時使用）----
-    decumulated = decumulate_quarterly_eps(df)
-    recent_quarters = decumulated.tail(4)
+    # ---- 備援：TTM（近四季單季EPS直接加總，財報空窗期、去年獲利不穩定
+    #      或比例不合理時使用；因為原始資料本身就是單季數，不需要再還原）----
+    # 同樣要求加總結果必須是正值——如果近四季實際上是虧損（TTM<=0），
+    # 代表這家公司近期財務狀況不佳，本益比估值法在這種情況下得不到
+    # 有意義的結果（不存在負的股價）。
+    #
+    # ⚠️ 這裡明確標記成 "loss"（虧損），跟 "insufficient_data"（真的缺資料）
+    # 分開——兩者都會讓 estimated_annual_eps 回傳 None，但代表的意義完全不同：
+    # 「虧損」是我們已經確實掌握、且應該給最差分數的負面資訊；
+    # 「缺資料」則是真的不知道，不該懲罰。呼叫端(pipeline.py)要用 method
+    # 這個回傳值去判斷該給哪一種待遇，不能只看 estimated_annual_eps 是不是 None。
+    df_sorted = df.sort_values("date")
+    recent_quarters = df_sorted.tail(4)
     if len(recent_quarters) == 4:
-        ttm = float(recent_quarters["eps_standalone"].sum())
-        return ttm, "ttm"
+        ttm = float(recent_quarters["eps_cumulative"].sum())
+        if ttm > 0:
+            return ttm, "ttm"
+        return None, "loss"
+
+    if extrapolation_was_loss:
+        return None, "loss"  # 沒有足夠資料算TTM，但外推法已經明確算出虧損
 
     return None, "insufficient_data"
 
@@ -95,7 +116,7 @@ def compute_pe(current_price: float, estimated_annual_eps: float | None) -> floa
 
 
 def get_last_year_full_year_eps(stock_eps_df: pd.DataFrame, today: pd.Timestamp | None = None) -> float | None:
-    """取得「去年全年（Q4累計）EPS」，供判斷今年估算EPS是否較去年成長使用。"""
+    """取得「去年全年EPS」（四個單季加總），供判斷今年估算EPS是否較去年成長使用。"""
     if today is None:
         today = pd.Timestamp.today()
     if stock_eps_df.empty:
@@ -106,10 +127,39 @@ def get_last_year_full_year_eps(stock_eps_df: pd.DataFrame, today: pd.Timestamp 
     df["quarter"] = df["date"].apply(_quarter_of)
 
     last_year = today.year - 1
-    fy_last = df[(df["year"] == last_year) & (df["quarter"] == 4)]
-    if fy_last.empty:
-        return None
-    return float(fy_last.iloc[0]["eps_cumulative"])
+    return _sum_standalone_eps(df, last_year, [1, 2, 3, 4])
+
+
+# ⚠️ 使用者手動指定的產業別本益比排除門檻（2026/08 定案，非回測結果，
+# 之後若發現不合理可再調整）。PE 超過對應門檻視為異常值，不列入同業
+# 平均本益比的計算。沒有列在這裡的產業（例如ETF），只排除虧損股，
+# 不做上限排除。
+INDUSTRY_PE_CUTOFF = {
+    "PCB／載板／CCL": 30,
+    "光學元件": 30,
+    "光通訊": 60,
+    "半導體－IC設計": 55,
+    "半導體－封測": 40,
+    "半導體－晶圓代工": 30,
+    "半導體－記憶體": 30,
+    "塑膠/石化及煉油": 15,
+    "工業電腦/物聯網": 30,
+    "散熱": 30,
+    "測試儀器": 30,
+    "精密機構件": 30,
+    "網通設備": 30,
+    "航運": 15,
+    "被動元件": 30,
+    "連接器/線纜": 30,
+    "金控－壽險為主": 25,
+    "金控－證券為主": 25,
+    "金控－銀行": 25,
+    "鋼鐵": 18,
+    "電信服務商": 30,
+    "電子代工": 20,
+    "電源管理/重電": 35,
+    "食品/多角化零售": 20,
+}
 
 
 def eps_growing(estimated_annual_eps: float | None, last_year_full_year_eps: float | None) -> bool:
@@ -125,21 +175,45 @@ def eps_growing(estimated_annual_eps: float | None, last_year_full_year_eps: flo
 def compute_industry_pe_benchmark(pe_by_industry: pd.DataFrame) -> dict[str, float]:
     """
     pe_by_industry 需含 industry、pe 兩欄（每檔股票一列）。
-    排除 PE<=0（虧損股）與極端值（IQR法：超過 Q3+1.5*IQR）後，計算每個產業的平均本益比。
+    排除 PE<=0（虧損股），並用使用者手動指定的產業別門檻（INDUSTRY_PE_CUTOFF）
+    排除異常值後，計算每個產業的平均本益比。
+
+    ⚠️ 這裡改用使用者依照對各產業合理本益比範圍的主觀判斷手動指定的門檻，
+    取代原本的 IQR（四分位距）統計方法——原因是 IQR 在樣本數小的產業
+    (部分產業只有3-5檔股票)判斷不夠穩定，且只排除「過高」異常值、
+    不排除「過低」異常值。手動門檻雖然主觀，但至少確定、可預期、
+    容易逐一檢查是否合理。這些數字之後若有需要可以再調整。
+
+    ⚠️ 備援規則：如果整個產業「所有股票的本益比都超過門檻」（篩選後
+    一檔都不剩），不會讓這個產業的基準本益比整個算不出來（那樣會讓
+    這個產業的估值檢查形同虛設，沒有任何一檔股票會被判定為過虛）。
+    這種情況下，直接把「門檻值本身」當作這個產業的基準——邏輯上等於
+    「連最便宜的一檔都比我認為合理的上限還貴，那就用這個上限本身當
+    及格線」，比起完全沒有基準，這樣至少還能篩出「比整個產業裡最低
+    的都還貴1.5倍」這種真正誇張的個股。
+
+    沒有在 INDUSTRY_PE_CUTOFF 裡指定門檻的產業（例如ETF，本身沒有EPS/本益比
+    這種傳統股票估值概念），只排除虧損股，不做上限排除，取剩餘股票的平均。
+
     回傳 {產業: 平均本益比}。
     """
     result = {}
     for industry, group in pe_by_industry.groupby("industry"):
         valid = group[group["pe"] > 0]["pe"]
-        if len(valid) < 2:
+        if valid.empty:
             continue
-        q1, q3 = valid.quantile(0.25), valid.quantile(0.75)
-        iqr = q3 - q1
-        upper_bound = q3 + 1.5 * iqr
-        cleaned = valid[valid <= upper_bound]
+
+        cutoff = INDUSTRY_PE_CUTOFF.get(industry)
+        if cutoff is None:
+            result[industry] = float(valid.mean())
+            continue
+
+        cleaned = valid[valid <= cutoff]
         if cleaned.empty:
-            continue
-        result[industry] = float(cleaned.mean())
+            # 全部股票都超過門檻，直接用門檻值本身當基準，不留空
+            result[industry] = float(cutoff)
+        else:
+            result[industry] = float(cleaned.mean())
     return result
 
 
@@ -213,26 +287,48 @@ def margin_trend_score(stock_financials_df: pd.DataFrame, today: pd.Timestamp | 
     return float(np.clip(score, 0, 100))
 
 
-OVERVALUATION_THRESHOLD = 1.5  # ⚠️ 初始假設，之後用回測校準
+OVERVALUATION_THRESHOLD = 1.5  # ⚠️ 初始假設，之後用回測校準，供 is_overvalued() 的硬門檻使用
+VALUATION_SENSITIVITY = 0.25   # ⚠️ 初始假設，之後用回測校準，供 valuation_score() 的S型函數使用
 
 
-def valuation_score(pe: float | None, industry_avg_pe: float | None, threshold_multiple: float = OVERVALUATION_THRESHOLD) -> float:
+def valuation_score(pe: float | None, industry_avg_pe: float | None, is_loss: bool = False) -> float:
     """
-    估值子分數（門檻式，不是漸進分數）：
-    - 缺資料（PE 或同業基準算不出來）→ 給滿分（不因資料缺漏而扣分，保持中性）
-    - 本益比 <= 同業基準 × threshold_multiple → 100（通過，估值合理）
-    - 本益比 > 同業基準 × threshold_multiple → 0（不通過，估值過虛）
+    估值子分數（漸進式 0-100，不是硬門檻——已依使用者要求從門檻式改成漸進式，
+    呼應 relative_strength_score / margin_trend_score 同樣的S型函數設計手法）：
+    - is_loss=True（EPS估算方法明確判定近期虧損，見 estimate_annual_eps 的
+      method 回傳值）→ 0分（最低分）。這是「已經知道財務狀況不好」，
+      不該跟真正缺資料一樣給中性分數。
+    - 真正缺資料（PE或同業基準算不出來，且不是因為虧損）→ 50分（真正中性：
+      代表「不知道」，數值上剛好等於「本益比=同業基準」的分數，但語意不同，
+      這是刻意設計成一致，避免缺資料時給出比多數正常股票更高的不合理分數）。
+    - 本益比 vs 同業基準的相對差距（(pe/industry_avg_pe)-1），用S型函數映射：
+      本益比=同業基準 → 50分；越便宜分數越接近100；越貴分數越接近0。
+      本益比為同業基準1.5倍（原本的「過虛」硬門檻）時，分數約12分（明顯偏低但非死板歸零）。
     """
+    if is_loss:
+        return 0.0
     if pe is None or industry_avg_pe is None or industry_avg_pe <= 0:
-        return 100.0
-    return 100.0 if pe <= industry_avg_pe * threshold_multiple else 0.0
+        return 50.0
+    excess_ratio = (pe / industry_avg_pe) - 1.0
+    score = 100 / (1 + np.exp(excess_ratio / VALUATION_SENSITIVITY))
+    return float(np.clip(score, 0, 100))
 
 
-def is_overvalued(pe: float | None, industry_avg_pe: float | None, threshold_multiple: float = OVERVALUATION_THRESHOLD) -> bool:
+def is_overvalued(
+    pe: float | None, industry_avg_pe: float | None,
+    is_loss: bool = False, threshold_multiple: float = OVERVALUATION_THRESHOLD,
+) -> bool:
     """
     布林版本，供 Decision Engine 判斷是否要強制排除 BUY_NOW（即使其他各項條件都達標）。
-    缺資料時視為「不算過虛」（不強制排除），跟 valuation_score 的中性原則一致。
+    ⚠️ 這裡維持原本的門檻式硬判斷，跟上面改成漸進式的 valuation_score() 是
+    兩個不同用途的機制：這裡是「能不能買」的強制關卡，valuation_score() 是
+    「股票分數」裡的其中一項評分，兩者刻意保持獨立，不互相影響。
+    虧損公司（is_loss=True）視同「過虛」，一併強制排除，跟 valuation_score
+    給最低分的原則一致——「公司在虧錢」本身就是不該追高進場的理由。
+    真正缺資料時，維持「不算過虛」（不強制排除）。
     """
+    if is_loss:
+        return True
     if pe is None or industry_avg_pe is None or industry_avg_pe <= 0:
         return False
     return pe > industry_avg_pe * threshold_multiple
