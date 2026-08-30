@@ -36,6 +36,20 @@ DEFAULT_START_DATE = "2025-01-01"
 END_DATE = date.today().isoformat()  # 每次執行都自動抓到今天
 
 
+def _safe_error(e) -> str:
+    """
+    印出錯誤訊息前，先把密碼從字串裡過濾掉——避免資料庫連線失敗時，
+    底層套件的錯誤訊息不小心把完整連線字串（含密碼）一起印出來，
+    寫進 GitHub Actions 的執行日誌裡（尤其是 repo 設成 Public 之後，
+    日誌任何人都能看）。
+    """
+    msg = str(e)
+    password = DB_CONFIG.get("password")
+    if password:
+        msg = msg.replace(password, "***")
+    return msg
+
+
 def get_engine():
     safe_password = quote_plus(DB_CONFIG["password"])
     url = (
@@ -144,7 +158,7 @@ def main():
             write_raw(engine, stock_id, start_date, price_df, inst_df, margin_df)
             print(f"[{i}/{total}] {stock_id} 新增 {len(price_df)} 筆（{start_date} ~ {END_DATE}）")
         except Exception as e:
-            print(f"[{i}/{total}] {stock_id} 失敗：{e}")
+            print(f"[{i}/{total}] {stock_id} 失敗：{_safe_error(e)}")
         time.sleep(0.3)  # 避免過快觸發 API 限制
 
     print("\n全部股票更新完成！")

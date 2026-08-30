@@ -26,6 +26,20 @@ DB_CONFIG = {
 }
 
 
+def _safe_error(e) -> str:
+    """
+    印出錯誤訊息前，先把密碼從字串裡過濾掉——避免資料庫連線失敗時，
+    底層套件的錯誤訊息不小心把完整連線字串（含密碼）一起印出來，
+    寫進 GitHub Actions 的執行日誌裡（尤其是 repo 設成 Public 之後，
+    日誌任何人都能看）。
+    """
+    msg = str(e)
+    password = DB_CONFIG.get("password")
+    if password:
+        msg = msg.replace(password, "***")
+    return msg
+
+
 def get_engine():
     safe_password = quote_plus(DB_CONFIG["password"])
     url = (
@@ -123,7 +137,7 @@ def main():
             load_to_mart(engine, result, stock_id)
             print(f"[{i}/{total}] {stock_id} 技術指標計算完成，共 {len(result)} 筆")
         except Exception as e:
-            print(f"[{i}/{total}] {stock_id} 失敗：{e}")
+            print(f"[{i}/{total}] {stock_id} 失敗：{_safe_error(e)}")
 
     print("\n全部股票技術指標計算完成！")
 
