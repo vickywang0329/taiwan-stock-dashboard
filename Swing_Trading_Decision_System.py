@@ -2,7 +2,7 @@
 波段交易決策系統 Swing Trading Decision System
 主入口頁面（放在 dashboard_project 根目錄，取代原本的 dashboard.py 作為主入口）
 呼叫 decision_engine.pipeline.run_decision_system()，把每檔股票的
-Stock Score / Entry Score / 風險報酬比整合成 BUY_NOW / BUY_PULLBACK / WATCH / AVOID 四級訊號。
+Stock Score / 技術面型態分類 / 風險報酬比整合成 BUY_NOW / BUY_PULLBACK / WATCH / AVOID 四級訊號。
 
 執行方式：streamlit run Swing_Trading_Decision_System.py
 """
@@ -10,7 +10,7 @@ import streamlit as st
 import pandas as pd
 
 import i18n
-from decision_engine import pipeline
+from decision_engine import pipeline, scoring
 from watchlist import WATCHLIST
 
 TEXT = {
@@ -29,15 +29,32 @@ TEXT = {
 
     "col_stock": {"zh": "股票", "en": "Stock"},
     "col_stock_score": {"zh": "股票分數", "en": "Stock Score"},
-    "col_entry_zone": {"zh": "進場區間", "en": "Entry zone"},
+    "col_entry_price": {"zh": "進場價", "en": "Entry price"},
+    "col_pattern_type": {"zh": "型態", "en": "Pattern"},
+    "col_rr_ratio": {"zh": "風險報酬比", "en": "Risk/Reward"},
+    "pattern_breakout": {"zh": "突破型", "en": "Breakout"},
+    "pattern_pullback": {"zh": "回測型", "en": "Pullback"},
+    "pattern_neutral": {"zh": "中立", "en": "Neutral"},
     "col_stop_target": {"zh": "技術面停損/目標", "en": "Technical stop/target"},
     "col_current_price": {"zh": "現價", "en": "Current price"},
     "col_zones": {"zh": "技術面進場價", "en": "Technical entry price"},
     "zones_format": {"zh": "{small}元以下小幅布局，{full}元以下大幅加碼",
                      "en": "Small position below {small}, full position below {full}"},
+    "pullback_pattern_info": {"zh": "進場價{entry}元(風險報酬比{rr}，未達2.0門檻或其他條件未過)",
+                              "en": "Entry {entry} (R/R {rr}, below the 2.0 threshold or other conditions not met)"},
     "col_fair_value": {"zh": "基本面合理價格", "en": "Fundamental fair value"},
     "col_missing": {"zh": "尚缺條件", "en": "Missing conditions"},
     "col_exclude_reason": {"zh": "剔除原因", "en": "Exclusion reason"},
+
+    # 對應 decision_engine/engine.py 回傳的語言中立代碼
+    "reason_institutional_not_buying": {"zh": "法人未同步買超", "en": "No institutional net buying"},
+    "reason_volume_not_breakout": {"zh": "量能未突破", "en": "Volume hasn't confirmed breakout"},
+    "reason_trend_weak": {"zh": "技術趨勢偏弱", "en": "Weak technical trend"},
+    "reason_relative_strength_weak": {"zh": "相對大盤強度不足", "en": "Weak relative strength vs. market"},
+    "reason_conditions_incomplete": {"zh": "綜合條件尚未齊全", "en": "Overall conditions not yet complete"},
+    "reason_below_ma60": {"zh": "收盤價跌破 MA60", "en": "Close below MA60"},
+    "reason_false_breakout": {"zh": "假突破訊號", "en": "False breakout signal"},
+    "reason_quality_score_insufficient": {"zh": "綜合品質分數不足", "en": "Overall quality score insufficient"},
 
     "coverage_full": {"zh": "本次決策系統涵蓋 {n} / {total} 檔股票", "en": "This run covers {n} / {total} stocks"},
     "coverage_partial": {"zh": "⚠️ 本次決策系統只涵蓋 {n} / {total} 檔股票，以下股票因資料不足被跳過：",
@@ -47,39 +64,44 @@ TEXT = {
     "search_placeholder": {"zh": "輸入股票代碼，例如 2330", "en": "Enter stock code, e.g. 2330"},
     "search_result_title": {"zh": "查詢結果", "en": "Search result"},
     "search_not_in_watchlist": {"zh": "個股尚未新增至資料庫", "en": "This stock hasn't been added to the database yet"},
+    "score_breakdown_prefix": {"zh": "股票分數計算權重：", "en": "Stock Score breakdown: "},
+    "score_breakdown_suffix": {"zh": "，總計股票分數 {total:.1f} 分", "en": ", total Stock Score {total:.1f}"},
+    "score_breakdown_unavailable": {"zh": "（無法取得子分數明細）", "en": "(sub-score breakdown unavailable)"},
     "search_insufficient_data": {"zh": "個股已在觀察池中，但目前資料不足，尚未列入本次計算結果",
                                  "en": "This stock is in the watchlist, but there isn't enough data yet to include it in this run"},
 
     "explain_buy_now": {
         "zh": [
             "股票分數：技術趨勢、動能、相對強度、法人動向、產業資金流向、估值與毛利率趨勢綜合計算，滿分100（權重明細見下方*）",
-            "明天可買的判斷條件（五項須同時成立）：估值未過虛(本益比≤同業基準1.5倍)、收盤價站上突破價、乖離幅度合理(未追高)、近3日法人合計買超、估算全年EPS優於去年",
-            "進場區間：下緣為近20個交易日(不含當日)的最高價＝突破價，上緣為當日收盤價＋緩衝(0.3倍ATR14)",
+            "明天可買的判斷條件（五項須同時成立）：估值未過虛(本益比≤同業基準1.5倍)、收盤價站上突破價、技術面型態明確且風險報酬比≥2.0、近3日法人合計買超、估算全年EPS優於去年",
+            "型態判定：突破型＝收盤價站上近20日高點且成交量達均量1.5倍以上；回測型＝股價貼近月線(MA20，容忍±1.5%)且成交量萎縮至均量0.8倍以下；兩者皆非則為中立，不給進場價",
+            "進場價：突破型＝當日收盤價；回測型＝月線(MA20)",
+            "技術面停損：突破型＝當日最低點－0.5倍ATR14；回測型＝月線－1.5倍ATR14",
+            "技術面目標價：統一取近60個交易日最高價，作為「空間檢查」——若上方套牢區太近導致風險報酬比不足2.0，即使技術面突破也視為不值得進場",
             "基本面合理價格：優先以「今年上半年EPS×(去年全年EPS÷去年上半年EPS)」估算全年EPS（要求去年上半年、全年皆為正值獲利，且比例介於0.5~5倍之間），不符合則改用近四季(TTM)實際EPS合計；再乘以同產業(排除異常值)平均本益比得出",
-            "技術面停損/目標：停損取近期滾動低點，目標取2倍風險或前波高點取保守者",
         ],
         "en": [
             "Stock Score: weighted combination of trend, momentum, relative strength, institutional flow, sector flow, valuation and margin trend, out of 100 (weights below*)",
-            "Buy-now criteria (all five must hold): valuation not overextended (P/E ≤ 1.5× industry benchmark), close above breakout price, bias within range (not chasing), positive 3-day institutional net buy, estimated full-year EPS above last year's",
-            "Entry zone: lower bound = highest price of the past 20 trading days (excl. today) = breakout price; upper bound = today's close + 0.3×ATR14",
+            "Buy-now criteria (all five must hold): valuation not overextended (P/E ≤ 1.5× industry benchmark), close above breakout price, clear technical pattern with risk/reward ≥ 2.0, positive 3-day institutional net buy, estimated full-year EPS above last year's",
+            "Pattern classification: Breakout = close above the 20-day high with volume ≥1.5× average; Pullback = price near the 20-day MA (±1.5% tolerance) with volume shrinking to ≤0.8× average; otherwise Neutral (no entry price given)",
+            "Entry price: Breakout = today's close; Pullback = MA20",
+            "Technical stop loss: Breakout = today's low − 0.5×ATR14; Pullback = MA20 − 1.5×ATR14",
+            "Technical target: uses the 60-day high as a \"space check\" — if the overhead resistance is too close (risk/reward below 2.0), the setup is rejected even if a technical breakout occurred",
             "Fundamental fair value: prioritizes estimating full-year EPS via H1 EPS × (last year's full-year EPS ÷ last year's H1 EPS) — requires last year's H1 and full-year figures to both be profitable, with the ratio between 0.5x-5x; otherwise falls back to trailing-twelve-months (TTM) actual EPS. Multiplied by the industry's average P/E (outliers excluded)",
-            "Technical stop/target: stop loss uses the recent rolling low; target uses 2x risk or the prior swing high, whichever is more conservative",
         ],
     },
     "explain_pullback": {
         "zh": [
-            "等回檔的意思：股票分數已達標(≥85)，但「明天可買」五項條件未全部成立（常見原因：估值過虛、乖離過大、法人未同步買超、或EPS未成長），故建議等回檔",
-            "小幅布局門檻：突破價＋0.5倍ATR14，股價跌破此價位、量能未異常放大且支撐未破時可小幅布局",
-            "大幅加碼門檻：突破價－0.5倍ATR14，股價跌破此價位、且法人未持續賣超時可大幅加碼",
+            "等回檔的意思：股票分數已達標(≥85)，但「明天可買」五項條件未全部成立（常見原因：估值過虛、技術面型態不明確或風險報酬比不足2.0、法人未同步買超、或EPS未成長），故建議等回檔",
+            "若已偵測到明確型態（突破型/回測型）：進場價/停損/目標價計算方式同上方明天可買區塊，只是風險報酬比未達2.0或其他條件未過，欄位會標註風險報酬比數值供參考",
+            "若型態中立（尚未形成明確突破或回測結構）：改顯示小幅布局／大幅加碼兩個價格門檻——突破價＋0.5倍ATR14以下可小幅布局，突破價－0.5倍ATR14以下且法人未持續賣超可大幅加碼",
             "基本面合理價格：計算方式同上方明天可買區塊",
-            "技術面停損/目標：計算方式同上方明天可買區塊",
         ],
         "en": [
-            "What \"wait for pullback\" means: Stock Score already passes (≥85), but not all five buy-now conditions hold (common reasons: overextended valuation, price too far from breakout, no institutional buying, or EPS not growing) — so wait for a pullback instead",
-            "Small-position threshold: breakout price + 0.5×ATR14 — once price falls below this, without abnormal volume and support intact, a small position is reasonable",
-            "Full-position threshold: breakout price − 0.5×ATR14 — once price falls below this, and institutional selling hasn't persisted, adding a full position is reasonable",
+            "What \"wait for pullback\" means: Stock Score already passes (≥85), but not all five buy-now conditions hold (common reasons: overextended valuation, unclear technical pattern or risk/reward below 2.0, no institutional buying, or EPS not growing) — so wait for a pullback instead",
+            "If a clear pattern (breakout/pullback) was detected: entry/stop/target use the same calculation as the Buy Now section above, just with risk/reward below 2.0 or another condition unmet — the risk/reward value is shown for reference",
+            "If the pattern is neutral (no confirmed breakout or pullback structure yet): shows the small-position / full-position price thresholds instead — below breakout price + 0.5×ATR14 for a small position, below breakout price − 0.5×ATR14 with no persistent institutional selling for a full position",
             "Fundamental fair value: same calculation as the Buy Now section above",
-            "Technical stop/target: same calculation as the Buy Now section above",
         ],
     },
 
@@ -94,8 +116,8 @@ TEXT = {
     "col_signal": {"zh": "訊號", "en": "Signal"},
     "col_condition": {"zh": "條件", "en": "Condition"},
     "cond_buy_now": {
-        "zh": "品質達標(≥85分)，且五項條件同時成立：估值合理、站上突破價、乖離幅度合理(未追高)、法人買超、EPS優於去年",
-        "en": "Passes quality bar (≥85), and all five hold: valuation reasonable, above breakout price, bias within range (not chasing), institutional net buying, EPS above last year's",
+        "zh": "品質達標(≥85分)，且五項條件同時成立：估值合理、站上突破價、技術面型態明確且風險報酬比≥2.0、法人買超、EPS優於去年",
+        "en": "Passes quality bar (≥85), and all five hold: valuation reasonable, above breakout price, clear technical pattern with risk/reward ≥ 2.0, institutional net buying, EPS above last year's",
     },
     "cond_pullback": {
         "zh": "品質達標(≥85分)，但明天可買的五項條件未全部成立，故建議等回檔",
@@ -132,6 +154,21 @@ def format_range(rng) -> str:
         return "-"
     lo, hi = rng
     return f"{format_price(lo)}–{format_price(hi)}"
+
+
+def format_pattern_type(pattern_type: str | None) -> str:
+    mapping = {
+        "breakout": t("pattern_breakout"),
+        "pullback": t("pattern_pullback"),
+        "neutral": t("pattern_neutral"),
+    }
+    return mapping.get(pattern_type, "-")
+
+
+def translate_reasons(codes: list[str]) -> str:
+    """把 decision_engine 回傳的語言中立代碼（例如 'institutional_not_buying'）
+    轉成目前語言對應的文字，找不到對照時原樣顯示代碼（保底，不會整個消失）。"""
+    return "、".join(t(f"reason_{code}") if f"reason_{code}" in TEXT else code for code in codes)
 
 
 def format_zones(d) -> str:
@@ -226,6 +263,31 @@ SIGNAL_BADGE_KEY = {
 }
 
 
+def format_score_breakdown(d) -> str:
+    """依 sub_scores 跟 scoring.WEIGHTS 動態組出「股票分數計算權重」這行完整明細。"""
+    if not d.sub_scores:
+        return t("score_breakdown_unavailable")
+    parts = []
+    for key, weight in scoring.WEIGHTS.items():
+        value = d.sub_scores.get(key)
+        value_str = f"{value:.1f}" if value is not None else "-"
+        parts.append(f"{key}={value_str}({weight*100:.0f}%)")
+    return t("score_breakdown_prefix") + "、".join(parts) + t("score_breakdown_suffix", total=d.stock_score)
+
+
+def format_pullback_technical_info(d) -> str:
+    """
+    依 pattern_type 決定顯示內容：
+    - 有明確型態（突破型/回測型）：顯示 pattern.py 算出來的進場價與風險報酬比，
+      跟 BUY_NOW 表格用同一套演算法，維持系統一致性。
+    - 型態中立：退回舊的 Zone1(小幅布局)/Zone2(大幅加碼) 區間指引。
+    """
+    if d.pattern_type and d.pattern_type != "neutral" and d.entry_price is not None:
+        rr_str = f"{d.rr_ratio:.2f}" if d.rr_ratio is not None else "-"
+        return t("pullback_pattern_info", entry=format_price(d.entry_price), rr=rr_str)
+    return format_zones(d)
+
+
 def render_search_result(d):
     """依股票目前的分類，渲染出跟該分類表格對應的完整詳細卡片。"""
     label_key, color_key = SIGNAL_BADGE_KEY[d.signal]
@@ -233,20 +295,24 @@ def render_search_result(d):
 
     detail = {t("col_stock"): get_name(d), t("col_stock_score"): d.stock_score}
     if d.signal == "BUY_NOW":
-        detail[t("col_entry_zone")] = format_range(d.entry_zone)
+        detail[t("col_pattern_type")] = format_pattern_type(d.pattern_type)
+        detail[t("col_entry_price")] = format_price(d.entry_price)
+        detail[t("col_rr_ratio")] = f"{d.rr_ratio:.2f}" if d.rr_ratio is not None else "-"
         detail[t("col_fair_value")] = format_price(d.fair_value_estimate)
         detail[t("col_stop_target")] = f"{format_price(d.stop_loss)} / {format_price(d.target)}"
     elif d.signal == "BUY_PULLBACK":
         detail[t("col_current_price")] = format_price(d.current_price)
+        detail[t("col_pattern_type")] = format_pattern_type(d.pattern_type)
         detail[t("col_fair_value")] = format_price(d.fair_value_estimate)
-        detail[t("col_zones")] = format_zones(d)
+        detail[t("col_zones")] = format_pullback_technical_info(d)
         detail[t("col_stop_target")] = f"{format_price(d.stop_loss)} / {format_price(d.target)}"
     elif d.signal == "WATCH":
-        detail[t("col_missing")] = "、".join(d.missing_conditions)
+        detail[t("col_missing")] = translate_reasons(d.missing_conditions)
     elif d.signal == "AVOID":
-        detail[t("col_exclude_reason")] = "、".join(d.exclude_reason)
+        detail[t("col_exclude_reason")] = translate_reasons(d.exclude_reason)
 
     st.dataframe(pd.DataFrame([detail]), use_container_width=True, hide_index=True)
+    st.caption(format_score_breakdown(d))
 
 
 st.markdown("---")
@@ -268,7 +334,9 @@ if buy_now:
     rows = [{
         t("col_stock"): get_name(d),
         t("col_stock_score"): d.stock_score,
-        t("col_entry_zone"): format_range(d.entry_zone),
+        t("col_pattern_type"): format_pattern_type(d.pattern_type),
+        t("col_entry_price"): format_price(d.entry_price),
+        t("col_rr_ratio"): f"{d.rr_ratio:.2f}" if d.rr_ratio is not None else "-",
         t("col_fair_value"): format_price(d.fair_value_estimate),
         t("col_stop_target"): f"{format_price(d.stop_loss)} / {format_price(d.target)}",
     } for d in buy_now]
@@ -285,8 +353,9 @@ if buy_pullback:
         t("col_stock"): get_name(d),
         t("col_stock_score"): d.stock_score,
         t("col_current_price"): format_price(d.current_price),
+        t("col_pattern_type"): format_pattern_type(d.pattern_type),
         t("col_fair_value"): format_price(d.fair_value_estimate),
-        t("col_zones"): format_zones(d),
+        t("col_zones"): format_pullback_technical_info(d),
         t("col_stop_target"): f"{format_price(d.stop_loss)} / {format_price(d.target)}",
     } for d in buy_pullback]
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
@@ -301,7 +370,7 @@ if watch:
     rows = [{
         t("col_stock"): get_name(d),
         t("col_stock_score"): d.stock_score,
-        t("col_missing"): "、".join(d.missing_conditions),
+        t("col_missing"): translate_reasons(d.missing_conditions),
     } for d in watch]
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -312,7 +381,7 @@ render_badge(t("signal_avoid"), "avoid", len(avoid))
 if avoid:
     rows = [{
         t("col_stock"): get_name(d),
-        t("col_exclude_reason"): "、".join(d.exclude_reason),
+        t("col_exclude_reason"): translate_reasons(d.exclude_reason),
     } for d in avoid]
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
