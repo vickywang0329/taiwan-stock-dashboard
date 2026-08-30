@@ -34,12 +34,33 @@ INSTITUTIONAL_LOOKBACK_DAYS = 10  # 法人買賣超觀察區間
 # ---------------------------------------------------------------------------
 # 子分數
 # ---------------------------------------------------------------------------
+TREND_SENSITIVITY = 0.03  # ⚠️ 初始假設，之後用回測校準
+
+
 def trend_score(close: float, ma5: float, ma20: float, ma60: float) -> float:
-    """多頭排列（close > MA5 > MA20 > MA60）給滿分，逐項不成立扣分。"""
-    score = 0
-    checks = [close > ma5, ma5 > ma20, ma20 > ma60, close > ma60]
-    score = 100 * sum(checks) / len(checks)
-    return score
+    """
+    技術趨勢分數（漸進式 0-100，不是離散的0/25/50/75/100）：
+    收盤價/MA5/MA20/MA60 四組關係，各自算出百分比差距，
+    用S型函數映射成分數，四組取平均——跟 relative_strength_score /
+    margin_trend_score / valuation_score 用同一套設計語言。
+
+    每組差距為0（剛好持平）→ 50分（中性）；差距為正（多頭排列成立）
+    → 分數越高於50分，差距越大分數越接近100；差距為負 → 分數越低於50分，
+    差距越大分數越接近0。跟舊版離散給分最大的差異：能反映「多頭排列的
+    強弱程度」，不會因為「剛好突破一點點」跟「大幅突破」給一樣的分數，
+    也不會因為「些微跌破」就整項直接歸零。
+    """
+    if any(v in (None, 0) or pd.isna(v) for v in (ma5, ma20, ma60)):
+        return 50.0
+
+    gaps = [
+        (close - ma5) / ma5,
+        (ma5 - ma20) / ma20,
+        (ma20 - ma60) / ma60,
+        (close - ma60) / ma60,
+    ]
+    scores = [100 / (1 + np.exp(-gap / TREND_SENSITIVITY)) for gap in gaps]
+    return float(np.clip(sum(scores) / len(scores), 0, 100))
 
 
 def momentum_score(rsi14: float, macd_hist: float) -> float:
