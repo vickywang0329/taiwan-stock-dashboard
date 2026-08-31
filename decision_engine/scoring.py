@@ -11,21 +11,90 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .valuation import valuation_score, margin_trend_score  # noqa: F401  重新匯出，pipeline.py 統一從 scoring 呼叫
+from .valuation import (  # noqa: F401  重新匯出，pipeline.py 統一從 scoring 呼叫
+    valuation_score, margin_trend_score, pb_score, eps_growing_score, CYCLICAL_INDUSTRIES,
+)
 
 # ---------------------------------------------------------------------------
-# 股票分數權重（滿分 100，五個子分數各自 0-100 後加權平均）
+# ⚠️ 2026/08 架構調整：基本面（估值/EPS成長/毛利率趨勢）全面退出加權計分，
+# 改當「守門員」（在 engine.py 裡用布林值把關，不參與分數加權）——原因：
+# 一檔技術籌碼面極強的股票，過去常因為估值分數普通、毛利率分數普通，
+# 被拖累到門檻之下，等於基本面的平庸表現「稀釋」了技術面的強烈訊號。
+# 拆開後，Stock Score 完全反映「技術籌碼面值不值得留意」，基本面則負責
+# 在最後一關擋掉「技術面雖強、但基本面已經有明顯警訊」的地雷股，兩者
+# 分工清楚，不再互相稀釋。
+#
+# TECH_WEIGHTS 五項權重總和100%，注意這剛好等於本專案最初始（還沒加入
+# 估值檢查之前）的原始權重比例——不是走回頭路，而是把基本面獨立出來後，
+# 純技術籌碼部分回歸原始比例分配。
 # ---------------------------------------------------------------------------
-WEIGHTS = {
-    "trend": 0.20,               # 技術趨勢：站上 MA5/20/60 且多頭排列
-    "momentum": 0.16,            # 動能：RSI14、MACD 柱狀圖
-    "relative_strength": 0.16,   # 相對強度：對大盤/0050 的超額報酬
-    "institutional_flow": 0.16,  # 個股法人動向：近N日法人買賣超
-    "sector_flow": 0.12,         # 產業資金流向：重用熱力圖的法人排名邏輯
-    "valuation": 0.10,           # 估值：本益比是否明顯偏離同業（見 valuation.py）
-    "margin_trend": 0.10,        # 毛利率趨勢：今年累計毛利率 vs 去年同期（見 valuation.py）
+TECH_WEIGHTS = {
+    "trend": 0.25,
+    "momentum": 0.20,
+    "relative_strength": 0.20,
+    "institutional_flow": 0.20,
+    "sector_flow": 0.15,
 }
-assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-9
+assert abs(sum(TECH_WEIGHTS.values()) - 1.0) < 1e-9
+
+
+def compute_tech_score(sub_scores: dict) -> float:
+    """
+    技術籌碼分數（Stock Score，新架構下的核心分數，不含任何基本面成分）。
+    sub_scores 需含 keys: trend, momentum, relative_strength,
+    institutional_flow, sector_flow（各為 0-100）。
+    """
+    total = sum(TECH_WEIGHTS[k] * sub_scores[k] for k in TECH_WEIGHTS)
+    return round(float(np.clip(total, 0, 100)), 1)
+
+
+# ---------------------------------------------------------------------------
+# 股票分數權重（滿分 100，各子分數 0-100 後加權平均）
+# ⚠️ 舊版（基本面仍混入加權分數）保留在下面，新架構的 engine.py 已改用
+# 上方的 compute_tech_score()，這裡不再是主要判斷依據，僅保留供對照。
+#
+# 景氣循環股（航運/半導體－記憶體/塑膠石化及煉油/鋼鐵，見 valuation.py
+# 的 CYCLICAL_INDUSTRIES）用不同的一套權重：
+# - valuation 從10%降到5%（P/E失真，改用P/B，但P/B同樣不是萬能，保守降低權重）
+# - margin_trend 直接歸零（循環股毛利率起伏主要是商品價格循環造成，不是
+#   公司自己的營運效率變化，用「今年比去年」的邏輯容易誤判；改成「跟長期
+#   循環週期平均比」需要更長的歷史資料深度，暫不投入這項工程）
+# - 空出來的15%權重，分配給新增的 eps_growing_score（EPS成長，連續分數），
+#   循環股投資的精髓常常就是抓住「剛從谷底往上爬」的轉折點，這個訊號
+#   對循環股格外重要，故給予比非循環股更高的權重（15% vs 10%）
+# ---------------------------------------------------------------------------
+WEIGHTS_NON_CYCLICAL = {
+    "trend": 0.20,
+    "momentum": 0.16,
+    "relative_strength": 0.16,
+    "institutional_flow": 0.16,
+    "sector_flow": 0.12,
+    "valuation": 0.05,
+    "margin_trend": 0.05,
+    "eps_growing_score": 0.10,
+}
+WEIGHTS_CYCLICAL = {
+    "trend": 0.20,
+    "momentum": 0.16,
+    "relative_strength": 0.16,
+    "institutional_flow": 0.16,
+    "sector_flow": 0.12,
+    "valuation": 0.05,   # 景氣循環股這裡放的是 pb_score()，不是 valuation_score()
+    "margin_trend": 0.0,
+    "eps_growing_score": 0.15,
+}
+assert abs(sum(WEIGHTS_NON_CYCLICAL.values()) - 1.0) < 1e-9
+assert abs(sum(WEIGHTS_CYCLICAL.values()) - 1.0) < 1e-9
+assert set(WEIGHTS_NON_CYCLICAL.keys()) == set(WEIGHTS_CYCLICAL.keys())
+
+# 保留舊名稱 WEIGHTS 指向非景氣循環股版本，避免其他還沒更新的呼叫端直接出錯
+WEIGHTS = WEIGHTS_NON_CYCLICAL
+
+# ⚠️ 2026/08 修正記錄：毛利率是否「嚴重惡化」的判斷，已從這裡的絕對分數門檻
+# （MARGIN_SEVERE_DECLINE_THRESHOLD=30），改成 valuation.is_margin_severely_declining()
+# 裡的「相對衰退幅度>8%」判斷——絕對百分點門檻對高毛利率產業（如半導體－IC設計）
+# 天生不公平，已用真實資料驗證後改用相對百分比，全部非景氣循環股統一套用同一個
+# 相對門檻，不用再逐一產業手動設定絕對數字。
 
 RS_LOOKBACK_DAYS = 20          # 相對強度比較區間
 INSTITUTIONAL_LOOKBACK_DAYS = 10  # 法人買賣超觀察區間
@@ -106,12 +175,15 @@ def sector_flow_score(sector_rank_pct: float) -> float:
 # ---------------------------------------------------------------------------
 # 股票分數（總分）
 # ---------------------------------------------------------------------------
-def compute_stock_score(sub_scores: dict) -> float:
+def compute_stock_score(sub_scores: dict, is_cyclical: bool = False) -> float:
     """
     sub_scores 需含 keys: trend, momentum, relative_strength,
-    institutional_flow, sector_flow（各為 0-100）
+    institutional_flow, sector_flow, valuation, margin_trend,
+    eps_growing_score（各為 0-100）。
+    is_cyclical=True 時改用 WEIGHTS_CYCLICAL（見上方說明）。
     """
-    total = sum(WEIGHTS[k] * sub_scores[k] for k in WEIGHTS)
+    weights = WEIGHTS_CYCLICAL if is_cyclical else WEIGHTS_NON_CYCLICAL
+    total = sum(weights[k] * sub_scores[k] for k in weights)
     return round(float(np.clip(total, 0, 100)), 1)
 
 

@@ -181,9 +181,11 @@ def load_stock_info(stock_ids: list[str]) -> pd.DataFrame:
 
 
 def load_eps_quarterly(stock_ids: list[str]) -> pd.DataFrame:
-    """撈取觀察池股票的季度累計財報資料（EPS、毛利、營業成本），供估值與毛利率趨勢判斷使用。"""
+    """撈取觀察池股票的季度累計財報資料（EPS、毛利、營業成本、淨利、股東權益），
+    供估值(P/E或P/B)與毛利率趨勢判斷使用。"""
     sql = """
-        select stock_id, date, eps_cumulative, gross_profit, cost_of_goods_sold
+        select stock_id, date, eps_cumulative, gross_profit, cost_of_goods_sold,
+               net_income, equity
         from raw.eps_quarterly
         where stock_id = any(:ids)
         order by stock_id, date

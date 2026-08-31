@@ -256,7 +256,8 @@ def _find_latest_available_quarter(stock_financials_df: pd.DataFrame, today: pd.
     return int(latest["fyear"]), int(latest["fquarter"])
 
 
-MARGIN_SENSITIVITY = 2.0  # ⚠️ 初始假設，之後用回測校準
+MARGIN_SENSITIVITY = 2.0  # ⚠️ 初始假設，之後用回測校準（供 margin_trend_score 這個連續分數使用，
+                          # 該函式目前不在決策流程裡被呼叫，保留供未來參考或其他用途）
 
 
 def margin_trend_score(stock_financials_df: pd.DataFrame, today: pd.Timestamp | None = None) -> float:
@@ -285,6 +286,56 @@ def margin_trend_score(stock_financials_df: pd.DataFrame, today: pd.Timestamp | 
     change_pct_points = (margin_this - margin_last) * 100
     score = 100 / (1 + np.exp(-change_pct_points / MARGIN_SENSITIVITY))
     return float(np.clip(score, 0, 100))
+
+
+# ---------------------------------------------------------------------------
+# ⚠️ 2026/08 修正記錄：原本用「絕對百分點」判斷毛利率是否嚴重惡化（分數<30，
+# 對應約-1.69個百分點），實測發現對高毛利率產業（例如半導體－IC設計，平均
+# 毛利率39.21%）天生不公平——同樣絕對降3個百分點，對50%毛利率的公司只是
+# 相對衰退6%，對10%毛利率的公司卻是相對衰退30%，嚴重程度天差地遠。
+# 已改用「相對衰退幅度」，套用在全部非景氣循環股，不用再逐一產業手動設定
+# 絕對門檻。
+# ---------------------------------------------------------------------------
+MARGIN_RELATIVE_DECLINE_THRESHOLD = 0.08  # 相對衰退超過8%視為「毛利率明顯衰退」，使用者確認定案
+
+
+def is_margin_severely_declining(
+    stock_financials_df: pd.DataFrame, today: pd.Timestamp | None = None,
+    threshold: float = MARGIN_RELATIVE_DECLINE_THRESHOLD,
+) -> bool:
+    """
+    判斷毛利率是否「明顯衰退」，用相對衰退幅度而非絕對百分點：
+
+        相對衰退幅度 = (去年同期毛利率 − 今年毛利率) ÷ 去年同期毛利率
+
+    相對衰退幅度 > 門檻（預設8%）→ 判定明顯衰退。
+
+    特殊情況：
+    - 今年毛利率轉為負值（去年是正值）→ 直接判定明顯衰退，不需要算相對
+      幅度才能判斷（由盈轉虧比任何相對比例都嚴重）。
+    - 去年同期毛利率 <=0（基期本身就是虧損）→ 相對衰退計算沒有意義（分母
+      不是正常基準），回傳 False（不判定為明顯衰退，中性處理，不因基期
+      異常而誤傷）。
+    - 缺資料 → 回傳 False（中性，不因缺資料而受罰，跟系統其他地方一致）。
+    """
+    if today is None:
+        today = pd.Timestamp.today()
+
+    latest_period = _find_latest_available_quarter(stock_financials_df, today)
+    if latest_period is None:
+        return False
+    year, quarter = latest_period
+
+    margin_this = get_gross_margin_at(stock_financials_df, year, quarter)
+    margin_last = get_gross_margin_at(stock_financials_df, year - 1, quarter)
+    if margin_this is None or margin_last is None or margin_last <= 0:
+        return False
+
+    if margin_this <= 0:
+        return True
+
+    relative_decline = (margin_last - margin_this) / margin_last
+    return relative_decline > threshold
 
 
 OVERVALUATION_THRESHOLD = 1.5  # ⚠️ 初始假設，之後用回測校準，供 is_overvalued() 的硬門檻使用
@@ -332,3 +383,143 @@ def is_overvalued(
     if pe is None or industry_avg_pe is None or industry_avg_pe <= 0:
         return False
     return pe > industry_avg_pe * threshold_multiple
+
+
+# ---------------------------------------------------------------------------
+# 景氣循環股：valuation 改用 P/B（股價淨值比），margin_trend 權重歸零
+# 已與使用者確認：用真實EPS波動度（變異係數）診斷驗證過，塑膠/石化及煉油、
+# 半導體－記憶體 是最強力驗證的兩個，鋼鐵中等驗證，航運則因資料歷史深度
+# 不足未能驗證（但有真實歷史數據佐證其循環特性），四類統一歸類為景氣循環股。
+# ---------------------------------------------------------------------------
+CYCLICAL_INDUSTRIES = {
+    "半導體－記憶體",
+    "塑膠/石化及煉油",
+    "鋼鐵",
+    "航運",
+}
+
+MIN_EPS_FOR_SHARE_ESTIMATE = 0.05  # ⚠️ 初始假設，EPS絕對值小於這個門檻時，反推股數不可靠，不採用
+
+
+def estimate_shares_outstanding(net_income: float | None, eps_standalone: float | None) -> float | None:
+    """
+    股數估算 = 淨利 ÷ 單季EPS。
+    ⚠️ 這是估算值，不是真實股數（FinMind沒有直接提供股數欄位）。
+    比照EPS估算的防呆原則：EPS絕對值太小時，除法會爆炸或失真，這種情況
+    直接回傳 None，不採用這筆估算，避免用不可靠的股數污染後續的P/B計算。
+    """
+    if net_income is None or eps_standalone is None:
+        return None
+    if pd.isna(net_income) or pd.isna(eps_standalone):
+        return None
+    if abs(eps_standalone) < MIN_EPS_FOR_SHARE_ESTIMATE:
+        return None
+    shares = net_income / eps_standalone
+    if shares <= 0:
+        return None
+    return shares
+
+
+def compute_book_value_per_share(stock_financials_df: pd.DataFrame) -> tuple[float | None, str]:
+    """
+    每股淨值 = 最新一筆股東權益 ÷ 用同一季反推出來的股數。
+    equity（股東權益）是資產負債表科目，屬於「某個時間點的餘額」，
+    不是像EPS/毛利那樣的「累計流量」，所以直接取最新一筆可用的資料即可，
+    不需要像EPS那樣做單季/累計的轉換。
+
+    回傳 (每股淨值, 狀態)，狀態為 "ok" / "negative_equity" / "insufficient_data"，
+    比照 estimate_annual_eps 的 (值, method) 設計——"股東權益為負"（淨值已經
+    虧光，比一般EPS虧損更嚴重的警訊）跟"真的缺資料"是完全不同的意義，
+    不該混在一起都回傳 None，要讓呼叫端能分別處理（比照 valuation_score
+    對 is_loss 跟缺資料給不同分數的原則）。
+    """
+    if stock_financials_df.empty:
+        return None, "insufficient_data"
+
+    df = stock_financials_df.dropna(subset=["equity", "net_income", "eps_cumulative"]).sort_values("date")
+    if df.empty:
+        return None, "insufficient_data"
+
+    latest = df.iloc[-1]
+    shares = estimate_shares_outstanding(latest["net_income"], latest["eps_cumulative"])
+    if shares is None:
+        return None, "insufficient_data"
+
+    equity = latest["equity"]
+    if pd.isna(equity):
+        return None, "insufficient_data"
+    if equity <= 0:
+        return None, "negative_equity"
+
+    return float(equity / shares), "ok"
+
+
+def compute_pb(current_price: float, book_value_per_share: float | None) -> float | None:
+    """P/B = 現價 ÷ 每股淨值。淨值算不出來或非正值，回傳 None。"""
+    if book_value_per_share is None or book_value_per_share <= 0:
+        return None
+    return current_price / book_value_per_share
+
+
+def compute_industry_pb_benchmark(pb_by_industry: pd.DataFrame) -> dict[str, float]:
+    """
+    pb_by_industry 需含 industry、pb 兩欄。
+    ⚠️ 這裡用 IQR（四分位距）統計方法排除異常值，跟本益比那邊改成使用者
+    手動指定門檻不同——P/B 目前沒有另外請使用者逐一產業訂定門檻，
+    考量開發時間，先用回歸統計方法頂著，之後有需要可以再比照P/E的做法
+    改成手動門檻。
+    """
+    result = {}
+    for industry, group in pb_by_industry.groupby("industry"):
+        valid = group[group["pb"] > 0]["pb"]
+        if len(valid) < 2:
+            if len(valid) == 1:
+                result[industry] = float(valid.iloc[0])
+            continue
+        q1, q3 = valid.quantile(0.25), valid.quantile(0.75)
+        iqr = q3 - q1
+        upper_bound = q3 + 1.5 * iqr
+        cleaned = valid[valid <= upper_bound]
+        if cleaned.empty:
+            continue
+        result[industry] = float(cleaned.mean())
+    return result
+
+
+PB_SENSITIVITY = 0.25  # ⚠️ 初始假設，之後用回測校準，跟 valuation_score 的 VALUATION_SENSITIVITY 同樣手法
+
+
+def pb_score(pb: float | None, industry_avg_pb: float | None, has_negative_equity: bool = False) -> float:
+    """
+    景氣循環股專用的估值子分數（用P/B取代P/E，S型函數，漸進式）：
+    - has_negative_equity=True（股東權益為負，淨值已經虧光）→ 0分，比EPS虧損更嚴重的警訊
+    - 真正缺資料 → 50分中性
+    - P/B vs 同業基準的相對差距，用S型函數映射：P/B=同業基準 → 50分
+    """
+    if has_negative_equity:
+        return 0.0
+    if pb is None or industry_avg_pb is None or industry_avg_pb <= 0:
+        return 50.0
+    excess_ratio = (pb / industry_avg_pb) - 1.0
+    score = 100 / (1 + np.exp(excess_ratio / PB_SENSITIVITY))
+    return float(np.clip(score, 0, 100))
+
+
+EPS_GROWTH_SENSITIVITY = 0.15  # ⚠️ 初始假設，之後用回測校準
+
+
+def eps_growing_score(estimated_annual_eps: float | None, last_year_full_year_eps: float | None) -> float:
+    """
+    連續型 EPS 成長分數（取代原本只有「有沒有成長」的布林值，改成S型函數映射
+    成長幅度）：成長率=0（打平）→ 50分；成長越多分數越接近100；
+    衰退越多分數越接近0。用 |去年EPS| 當分母，即使去年是虧損（負值），
+    只要今年由虧轉盈，成長率算出來仍然會是正值，正確反映「轉機」。
+    缺資料時回傳中性50分。
+    """
+    if estimated_annual_eps is None or last_year_full_year_eps is None:
+        return 50.0
+    if last_year_full_year_eps == 0:
+        return 50.0
+    growth_rate = (estimated_annual_eps - last_year_full_year_eps) / abs(last_year_full_year_eps)
+    score = 100 / (1 + np.exp(-growth_rate / EPS_GROWTH_SENSITIVITY))
+    return float(np.clip(score, 0, 100))
