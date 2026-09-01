@@ -141,12 +141,13 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
         stock_is_loss = is_loss_lookup.get(stock_id, False)
 
         if is_cyclical:
-            # 景氣循環股：valuation 改用 P/B，不用 P/E（見使用者確認的設計）
             stock_pb = pb_lookup.get(stock_id)
             industry_avg_pb = industry_pb_benchmark.get(sector)
             has_neg_equity = bvps_status_lookup.get(stock_id) == "negative_equity"
-            val_score = valuation.pb_score(stock_pb, industry_avg_pb, has_negative_equity=has_neg_equity)
-            overvalued = valuation.is_overvalued(stock_pb, industry_avg_pb, is_loss=has_neg_equity)
+            custom_threshold = valuation.LEADING_STOCKS_THRESHOLD.get(stock_id, valuation.OVERVALUATION_THRESHOLD)
+            overvalued = valuation.is_overvalued(
+                stock_pb, industry_avg_pb, is_loss=has_neg_equity, threshold_multiple=custom_threshold,
+                )
             # 合理價格用P/B×每股淨值反推，跟非循環股用P/E×EPS的概念一致，
             # 但循環股的每股淨值需要重新算一次（前面預備階段沒有保留bvps本身，只留了狀態）
             stock_eps_df_for_bvps = eps_by_stock.get(stock_id, pd.DataFrame())
@@ -159,11 +160,11 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
         else:
             industry_avg_pe = industry_pe_benchmark.get(sector)
             stock_pe = pe_lookup.get(stock_id)
-            val_score = valuation.valuation_score(stock_pe, industry_avg_pe, is_loss=stock_is_loss)
-            overvalued = valuation.is_overvalued(stock_pe, industry_avg_pe, is_loss=stock_is_loss)
-            # 合理價格 = 估算全年EPS × 產業同業本益比基準
-            # ⚠️ 要求 EPS 估算值必須是正值——虧損公司用本益比×EPS算「合理價格」
-            # 沒有意義（會算出負的價格），比照 compute_pe() 同樣的邏輯處理
+            custom_threshold = valuation.LEADING_STOCKS_THRESHOLD.get(stock_id, valuation.OVERVALUATION_THRESHOLD)
+            overvalued = valuation.is_overvalued(
+                stock_pe, industry_avg_pe, is_loss=stock_is_loss, threshold_multiple=custom_threshold,
+            )
+
             fair_value = (
                 stock_estimate * industry_avg_pe
                 if stock_estimate is not None and stock_estimate > 0 and industry_avg_pe is not None
