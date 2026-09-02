@@ -194,3 +194,4 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
         results.append(decision)
 
     return results
+
