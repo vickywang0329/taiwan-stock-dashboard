@@ -16,7 +16,7 @@ import streamlit as st
 import pandas as pd
 
 import i18n
-from decision_engine import pipeline, scoring
+from decision_engine import pipeline, scoring, db
 from watchlist import WATCHLIST
 
 TEXT = {
@@ -51,7 +51,7 @@ TEXT = {
     # 對應基本面守門檢查沒過的原因代碼（AVOID 用）
     "reason_overvalued": {"zh": "估值過虛（本益比或本淨比明顯偏離同業）", "en": "Overvalued (P/E or P/B far above industry peers)"},
     "reason_eps_declining": {"zh": "估算全年EPS較去年衰退", "en": "Estimated full-year EPS declining vs. last year"},
-    "reason_margin_severely_declining": {"zh": "毛利率較去年同期惡化", "en": "Gross margin rate worse than same period last year"},
+    "reason_margin_severely_declining": {"zh": "毛利率較去年同期嚴重惡化", "en": "Gross margin severely worse than same period last year"},
 
     "coverage_full": {"zh": "本次決策系統涵蓋 {n} / {total} 檔股票", "en": "This run covers {n} / {total} stocks"},
     "coverage_partial": {"zh": "⚠️ 本次決策系統只涵蓋 {n} / {total} 檔股票，以下股票因資料不足被跳過：",
@@ -69,7 +69,7 @@ TEXT = {
     "explain_buy_now": {
         "zh": [
             "股票分數（技術籌碼分數）：技術趨勢、動能、相對強度、法人動向、產業資金流向五項加權計算，滿分100，完全不含基本面成分（權重明細見下方*）",
-            "買進的判斷條件（只看兩件事）：① 基本面通過守門檢查（估值未過虛、EPS優於去年、毛利率沒有惡化——景氣循環股豁免毛利率檢查） ② 股票分數≥85",
+            "買進的判斷條件（只看兩件事）：① 基本面通過守門檢查（估值未過虛、EPS優於去年、毛利率沒有嚴重惡化——景氣循環股豁免毛利率檢查） ② 股票分數≥85",
             "基本面合理價格：一般股優先以「今年上半年EPS×(去年全年EPS÷去年上半年EPS)」估算全年EPS，乘以同業本益比基準；景氣循環股改用「每股淨值×同業本淨比基準」",
         ],
         "en": [
@@ -101,10 +101,10 @@ TEXT = {
     "weights_note": {
         "zh": "*股票分數（技術籌碼分數）計算權重：trend 25%、momentum 20%、relative_strength 20%、"
               "institutional_flow 20%、sector_flow 15%（總計100%，不含任何基本面成分）。"
-              "基本面（估值/EPS成長/毛利率趨勢）為獨立的守門檢查，不參與加權。尚未經過回測。",
+              "基本面（估值/EPS成長/毛利率趨勢）改為獨立的守門檢查，不參與加權，見下方避免分類說明。尚未經過回測。",
         "en": "*Stock Score (technical/institutional) weights: trend 25%, momentum 20%, relative_strength 20%, "
               "institutional_flow 20%, sector_flow 15% (100% total, no fundamental component). "
-              "Fundamentals (valuation/EPS growth/margin trend) are a separate gate check, not weighted. Not yet backtested.",
+              "Fundamentals (valuation/EPS growth/margin trend) are now a separate gate check, not weighted — see the Avoid categories below. Not yet backtested.",
     },
     "col_score_range": {"zh": "股票分數", "en": "Stock score"},
     "col_signal": {"zh": "訊號", "en": "Signal"},
@@ -164,6 +164,19 @@ def _cached_run_decision_system():
     return pipeline.run_decision_system()
 
 
+@st.cache_data(ttl=3600, persist="disk")
+def _cached_latest_data_date():
+    """
+    查詢資料庫裡實際最新一筆股價資料的日期，供頁面上方「資料更新至」
+    這行文字使用。⚠️ 修正記錄：這裡原本直接顯示 pd.Timestamp.today()
+    （今天的日曆日期），沒有真的查詢資料庫，導致跟 pages/ 底下其他
+    頁面（會真正查 MAX(date)）顯示的日期不一致，誤導使用者誤以為
+    資料已經更新到當天。改用 db.get_latest_data_date()，跟其他頁面
+    查同一張表、同一種邏輯。
+    """
+    return db.get_latest_data_date()
+
+
 st.set_page_config(page_title=t("page_title"), layout="wide")
 i18n.init_language()
 st.title(t("title"))
@@ -184,7 +197,10 @@ if not decisions:
     st.stop()
 
 lang = i18n.get_lang()
-st.caption(t("data_updated", date=pd.Timestamp.today().strftime("%Y/%m/%d")))
+
+latest_date = _cached_latest_data_date()
+if latest_date is not None:
+    st.caption(t("data_updated", date=latest_date.strftime("%Y/%m/%d")))
 
 # ---- 資料涵蓋率：確保「有股票被跳過」這件事看得到，不會悄悄消失 ----
 covered_ids = {d.stock_id for d in decisions}
@@ -350,3 +366,4 @@ st.caption(t("weights_note"))
 
 st.sidebar.markdown("---")
 st.sidebar.caption("A project by I.H. Wang")
+
