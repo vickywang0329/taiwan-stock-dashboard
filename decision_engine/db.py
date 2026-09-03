@@ -193,3 +193,21 @@ def load_eps_quarterly(stock_ids: list[str]) -> pd.DataFrame:
     df = _query_df(sql, {"ids": stock_ids})
     df["date"] = pd.to_datetime(df["date"])
     return df
+
+
+def get_latest_data_date():
+    """
+    查詢 staging.daily_master 裡實際最新一筆資料的日期，供頁面顯示
+    「資料更新至」使用。⚠️ 這裡刻意跟 pages/1_Individual_Stock.py 的
+    load_latest_data_date() 查同一張表、用同一種邏輯（MAX(date)），
+    確保各頁面顯示的日期一致，不會出現「主頁顯示今天、其他頁面顯示
+    昨天」這種誤導使用者的落差——這正是之前修正過的問題：主頁原本
+    用 pd.Timestamp.today()（今天的日曆日期）硬顯示，沒有真的查詢
+    資料庫，跟資料實際新舊程度脫節。
+    """
+    c = COLUMNS["daily_master"]
+    sql = f"select max({c['date']}) as latest_date from {c['table']}"
+    with get_conn() as conn:
+        result = conn.execute(text(sql)).scalar()
+    return result
+
