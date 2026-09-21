@@ -24,6 +24,17 @@ def load_sector_data() -> pd.DataFrame:
     """
     抓每檔股票：最新收盤價、最新成交值、近3/10/20/60日的三大法人合計買賣超股數之和、
     近3/10/20/60日的價格報酬率，並關聯產業分類（中文＋英文皆保留）
+
+    ⚠️ 2026/09 修正記錄：原本 FROM staging.daily_master 沒有任何日期篩選，
+    對整張表做全表掃描（Seq Scan）算視窗函數——專案剛開始、歷史資料還少
+    時沒問題，但隨著每天自動抓資料累積，這張表的資料量持續增加，查詢
+    時間也跟著越來越長，直到某天超過 Supabase 的 statement_timeout
+    被資料庫強制取消（確認於 Supabase 日誌：duration 52892ms 的全表
+    掃描紀錄）。改成只抓最近約100個交易日（用日期範圍，不是抓「最近N筆」，
+    避免不同股票交易日數不一致時抓錯範圍）——比 LAG 60天需要的範圍
+    多留一些緩衝，確保視窗函數的邊界股票仍能正確算出 60 天前的收盤價，
+    不會因為篩選範圍太窄而變成 NULL。查詢時間之後會維持穩定，不會再
+    隨資料庫歷史資料增加而持續變慢。
     """
     engine = get_engine()
     query = text("""
@@ -45,6 +56,7 @@ def load_sector_data() -> pd.DataFrame:
                 ) AS inst_net_10d_shares,
                 ROW_NUMBER() OVER (PARTITION BY m.stock_id ORDER BY m.date DESC) AS rn
             FROM staging.daily_master m
+            WHERE m.date >= (SELECT MAX(date) FROM staging.daily_master) - INTERVAL '150 days'
         )
         SELECT r.date, r.stock_id, r.close, r.trading_value,
                r.close_3d_ago, r.close_10d_ago, r.close_20d_ago, r.close_60d_ago,
