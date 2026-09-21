@@ -168,7 +168,19 @@ def load_price_history(stock_ids: list[str], lookback_days: int = 90) -> pd.Data
 
 
 def load_latest_indicators(stock_ids: list[str]) -> pd.DataFrame:
-    """撈每檔股票最新一筆技術指標，並在 Python 端補算 macd_hist（資料庫沒有這欄）。"""
+    """
+    撈每檔股票最新一筆技術指標，並在 Python 端補算 macd_hist（資料庫沒有這欄）。
+
+    ⚠️ 2026/09 修正記錄：DISTINCT ON + ORDER BY date DESC 這種寫法，效能
+    高度依賴資料庫有沒有 (stock_id, date) 的索引——沒有索引時，PostgreSQL
+    必須先掃描、排序整張表才能篩出每檔股票最新一筆，這張表隨每天自動
+    寫入持續增長，查詢會跟著越來越慢（觀察到實際案例：QueryCanceled）。
+    主要修正是資料庫加索引（CREATE INDEX ON mart.technical_indicators
+    (stock_id, date DESC)），這裡額外加上日期篩選當第二道防線——即使
+    索引不存在或因故失效，查詢範圍也有上限，不會隨資料庫增長而擴大。
+    30天緩衝遠超過「找最新一筆」實際需要的範圍（正常情況下每天都有新
+    資料，1天內就找得到），純粹是保險，避免偶發性缺資料的股票被誤篩掉。
+    """
     c = COLUMNS["technical_indicators"]
     sql = f"""
         select distinct on ({c['stock_id']})
@@ -179,6 +191,7 @@ def load_latest_indicators(stock_ids: list[str]) -> pd.DataFrame:
             {c['kd_k']} as kd_k, {c['kd_d']} as kd_d, {c['atr14']} as atr14
         from {c['table']}
         where {c['stock_id']} = any(:ids)
+          and {c['date']} >= (select max({c['date']}) from {c['table']}) - INTERVAL '30 days'
         order by {c['stock_id']}, {c['date']} desc
     """
     df = _query_df(sql, {"ids": stock_ids})
