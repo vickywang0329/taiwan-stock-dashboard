@@ -27,6 +27,9 @@ TEXT = {
     "no_data": {"zh": "目前沒有足夠資料可以計算，請確認資料庫已經有股價與技術指標資料。",
                "en": "Not enough data to compute signals yet. Please confirm price and indicator data exist."},
 
+    "maintenance_message": {"zh": "Oops，版主正在修復問題中", "en": "Oops, the developer is fixing an issue"},
+    "retry_button": {"zh": "🔄 重試", "en": "🔄 Retry"},
+
     "signal_buy_now": {"zh": "買進", "en": "Buy"},
     "signal_watch": {"zh": "觀察", "en": "Watch"},
     "signal_avoid_fundamental": {"zh": "避免（基本面地雷）", "en": "Avoid (Fundamental red flag)"},
@@ -179,6 +182,67 @@ def _cached_latest_data_date():
 
 st.set_page_config(page_title=t("page_title"), layout="wide")
 i18n.init_language()
+
+
+def _is_dev_bypass() -> bool:
+    """
+    判斷目前訪問者是不是開發者本人（透過網址帶入密語繞過維護頁面）。
+    ⚠️ 密語存在 st.secrets（不會被上傳到公開的GitHub repo），不能寫死
+    在程式碼裡——這個 repo 是 Public 的，寫死在程式碼裡等於公開密碼。
+    """
+    try:
+        dev_token = st.query_params.get("dev_token")
+        secret_token = st.secrets.get("dev_bypass_token")
+        return bool(dev_token) and bool(secret_token) and dev_token == secret_token
+    except Exception:
+        return False
+
+
+def _db_health_check() -> bool:
+    """
+    極輕量的資料庫連線健康檢查（SELECT 1），只是為了快速判斷「現在連得上
+    資料庫嗎」，不涉及任何真正的業務查詢。查得到就是True，任何連線層級
+    的例外都視為False（不讓這一步本身的例外往外拋，因為這裡本來就是
+    專門用來判斷「是不是該顯示維護頁面」的邏輯，不該自己也噴出技術性
+    錯誤訊息給使用者看）。
+    """
+    try:
+        from sqlalchemy import text
+        with db.get_conn() as conn:
+            conn.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
+
+
+def render_maintenance_page():
+    """
+    維護頁面：極簡的一行訊息 + 重試按鈕，不把技術性的錯誤堆疊訊息
+    (traceback) 直接暴露給外部使用者看。中英文都支援（沿用 i18n 既有的
+    語言切換機制，使用者可以在這個畫面上切換語言）。
+    """
+    lang = i18n.get_lang()
+    st.markdown(
+        f"<div style='text-align:center; padding-top:15vh;'>"
+        f"<p style='font-size:20px; color:#666;'>{t('maintenance_message')}</p>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button(t("retry_button"), use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+
+
+dev_bypass = _is_dev_bypass()
+
+if not dev_bypass and not _db_health_check():
+    # 一開始就連不上資料庫：直接顯示維護頁面，不繼續往下渲染任何
+    # 標題、側邊欄或其他業務邏輯內容。
+    render_maintenance_page()
+    st.stop()
+
 st.title(t("title"))
 
 if st.sidebar.button(
@@ -190,7 +254,17 @@ if st.sidebar.button(
     st.rerun()
 
 with st.spinner(t("loading")):
-    decisions = _cached_run_decision_system()
+    try:
+        decisions = _cached_run_decision_system()
+    except Exception:
+        # 第二道防線：一開始連線檢查有過關，但實際執行主要查詢時才出錯
+        # （例如查詢途中逾時）——開發者繞過模式下，直接把完整例外往外拋，
+        # 讓 Streamlit 顯示真正的錯誤堆疊方便除錯；一般使用者則看到
+        # 維護頁面，不看到任何技術性錯誤訊息。
+        if dev_bypass:
+            raise
+        render_maintenance_page()
+        st.stop()
 
 if not decisions:
     st.warning(t("no_data"))
@@ -198,7 +272,11 @@ if not decisions:
 
 lang = i18n.get_lang()
 
-latest_date = _cached_latest_data_date()
+try:
+    latest_date = _cached_latest_data_date()
+except Exception:
+    latest_date = None  # 次要資訊查詢失敗時，安靜地不顯示這行文字就好，
+                         # 不影響整頁其他核心功能的正常運作
 if latest_date is not None:
     st.caption(t("data_updated", date=latest_date.strftime("%Y/%m/%d")))
 
@@ -366,4 +444,3 @@ st.caption(t("weights_note"))
 
 st.sidebar.markdown("---")
 st.sidebar.caption("A project by I.H. Wang")
-
