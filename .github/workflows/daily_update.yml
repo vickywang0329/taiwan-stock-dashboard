@@ -32,6 +32,7 @@ jobs:
         run: python fetch_taiwan50_to_raw.py
 
       - name: 轉換至 staging layer
+        if: always()          
         env:
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
@@ -41,6 +42,7 @@ jobs:
         run: python transform_to_staging.py
 
       - name: 計算技術指標至 mart layer
+        if: always()          
         env:
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
