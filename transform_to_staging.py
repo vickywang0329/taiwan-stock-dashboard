@@ -2,9 +2,15 @@
 staging layer 轉換腳本
 從 raw schema 讀取三張原始表，清洗轉換後寫入 staging.daily_master
 （不再讀本地 CSV，改成直接對資料庫讀寫）
+
+增量更新：預設只處理最近 LOOKBACK_DAYS 天的資料，
+避免每天把全部歷史資料刪掉重寫，大幅降低資料庫 Disk IO。
+需要全量重建時（例如第一次執行、補資料），設定環境變數 FULL_REFRESH=1。
 """
 
 import os
+from datetime import date, timedelta
+
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from urllib.parse import quote_plus
@@ -12,7 +18,6 @@ import pandas as pd
 
 from watchlist import WATCHLIST
 
-# ---- 資料庫連線設定，請依你的實際狀況修改 ----
 # ---- 資料庫連線設定：從環境變數讀取，不寫死在程式碼裡 ----
 # 本機測試時，把 .env.example 複製成 .env 並填入真實值（.env 已在 .gitignore 中，不會被上傳）
 load_dotenv()
@@ -24,6 +29,11 @@ DB_CONFIG = {
     "port": os.environ.get("DB_PORT", "5432"),
     "database": os.environ.get("DB_NAME", "postgres"),
 }
+
+# 每次回溯處理的天數。保留一些緩衝，讓 FinMind 延遲更新、資料修正，
+# 或某天 Action 失敗時，隔天都能自動補上。
+LOOKBACK_DAYS = 14
+
 
 def _safe_error(e) -> str:
     """
@@ -48,11 +58,24 @@ def get_engine():
     return create_engine(url)
 
 
-def transform(engine, stock_id: str) -> pd.DataFrame:
+def get_since_date() -> date:
+    """決定這次要處理的起始日期：全量重建或只回溯最近幾天。"""
+    if os.environ.get("FULL_REFRESH") == "1":
+        print("FULL_REFRESH=1：全量重建所有歷史資料")
+        return date(2000, 1, 1)
+    since = date.today() - timedelta(days=LOOKBACK_DAYS)
+    print(f"增量更新：處理 {since} 之後的資料")
+    return since
+
+
+def transform(engine, stock_id: str, since: date) -> pd.DataFrame:
+    params = {"sid": stock_id, "since": since}
+
     # ---- 1. 從 raw 讀股價 ----
     price_df = pd.read_sql(
-        text("SELECT * FROM raw.stock_price WHERE stock_id = :sid"),
-        engine, params={"sid": stock_id},
+        text("SELECT * FROM raw.stock_price "
+             "WHERE stock_id = :sid AND date >= :since"),
+        engine, params=params,
     )
     price_df = price_df.rename(columns={
         "max": "high",
@@ -65,8 +88,9 @@ def transform(engine, stock_id: str) -> pd.DataFrame:
 
     # ---- 2. 從 raw 讀三大法人，long → wide 並計算淨買賣超 ----
     inst_df = pd.read_sql(
-        text("SELECT * FROM raw.institutional_investors WHERE stock_id = :sid"),
-        engine, params={"sid": stock_id},
+        text("SELECT * FROM raw.institutional_investors "
+             "WHERE stock_id = :sid AND date >= :since"),
+        engine, params=params,
     )
     if inst_df.empty:
         # ETF 等標的可能沒有三大法人資料，補一個空表避免後面出錯
@@ -96,8 +120,9 @@ def transform(engine, stock_id: str) -> pd.DataFrame:
 
     # ---- 3. 從 raw 讀融資融券，計算每日增減 ----
     margin_df = pd.read_sql(
-        text("SELECT * FROM raw.margin_short_sale WHERE stock_id = :sid"),
-        engine, params={"sid": stock_id},
+        text("SELECT * FROM raw.margin_short_sale "
+             "WHERE stock_id = :sid AND date >= :since"),
+        engine, params=params,
     )
     if margin_df.empty:
         margin_clean = pd.DataFrame(columns=[
@@ -125,26 +150,36 @@ def transform(engine, stock_id: str) -> pd.DataFrame:
     return master
 
 
-def load_to_staging(engine, df: pd.DataFrame, stock_id: str):
+def load_to_staging(engine, df: pd.DataFrame, stock_id: str, since: date):
+    # 刪除與寫入放在同一個 transaction：
+    # 寫入途中失敗會整個 rollback，不會出現「舊資料已刪、新資料沒寫進去」的情況
     with engine.begin() as conn:
-        # 先清掉這檔股票在 staging 裡的舊資料，避免重跑造成主鍵衝突
+        # 只刪除這次要重寫的日期範圍，不動更早的歷史資料
         conn.execute(
-            text("DELETE FROM staging.daily_master WHERE stock_id = :sid"),
-            {"sid": stock_id},
+            text("DELETE FROM staging.daily_master "
+                 "WHERE stock_id = :sid AND date >= :since"),
+            {"sid": stock_id, "since": since},
         )
-    df.to_sql("daily_master", engine, schema="staging", if_exists="append", index=False)
+        # method="multi" + chunksize：多筆合併成一條 INSERT 批次寫入，
+        # 減少 GitHub Actions（美國）與資料庫（東京）之間的來回次數
+        df.to_sql(
+            "daily_master", conn, schema="staging",
+            if_exists="append", index=False,
+            method="multi", chunksize=1000,
+        )
 
 
 def main():
     engine = get_engine()
+    since = get_since_date()
     total = len(WATCHLIST)
     for i, stock_id in enumerate(WATCHLIST, start=1):
         try:
-            master = transform(engine, stock_id)
+            master = transform(engine, stock_id, since)
             if master.empty:
                 print(f"[{i}/{total}] {stock_id} raw layer 沒有資料，跳過")
                 continue
-            load_to_staging(engine, master, stock_id)
+            load_to_staging(engine, master, stock_id, since)
             print(f"[{i}/{total}] {stock_id} 轉換完成並寫入，共 {len(master)} 筆")
         except Exception as e:
             print(f"[{i}/{total}] {stock_id} 失敗：{_safe_error(e)}")
