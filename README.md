@@ -116,48 +116,6 @@ dashboard_project/
 
 ---
 
-## Getting Started (Local)
-
-### 1. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Configure database credentials
-
-Copy `secrets.toml.example` to `.streamlit/secrets.toml` and fill in your Supabase connection details:
-
-```toml
-db_user = "postgres.xxxxxxxxxxxx"
-db_password = "your_password"
-db_host = "aws-0-ap-northeast-1.pooler.supabase.com"
-db_port = "5432"
-db_name = "postgres"
-```
-
-The batch scripts (`fetch_*.py`, `transform_*.py`, `calc_*.py`) also need a `.env` file in the project root with the same values under uppercase environment variable names: `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `FINMIND_TOKEN`.
-
-### 3. Initialize the database
-
-Run in order:
-
-```bash
-python load_stock_info.py taiwan_stocks_categorized_2.csv
-python fetch_taiwan50_to_raw.py
-python fetch_eps_to_raw.py
-python transform_to_staging.py
-python calc_technical_indicators.py
-```
-
-### 4. Launch the app
-
-```bash
-streamlit run Swing_Trading_Decision_System.py
-```
-
----
-
 ## Daily Automated Updates
 
 `.github/workflows/daily_update.yml` runs the price and technical-indicator update scripts at a fixed time on every Taiwan trading day and writes the results back to Supabase. The Streamlit Cloud deployment picks up the latest data once its cache expires.
@@ -173,4 +131,4 @@ streamlit run Swing_Trading_Decision_System.py
 5. **A deliberate screening philosophy**: the system is designed to surface stocks that are both "fundamentally sound" and "technically/institutionally strong" — not to capture every stock that's rallying. Some stocks with strong price action but failing fundamentals will be excluded by design; this is an intentional trade-off, not a bug.
 6. **Chasing risk and data-freshness constraints**: even with the fundamentals gate in place, the current methodology can still generate signals after a move is already underway, carrying chasing risk. Data is refreshed once daily, so signals can lag intraday price action.
 
-**⚠️ All scoring weights, valuation thresholds, and risk parameters in this project are initial assumptions set during development based on trading heuristics — they have not been validated through historical backtesting. This project is for technical demonstration and learning purposes only and does not constitute investment advice.**
+**⚠️ This project is for technical demonstration and learning purposes only and does not constitute investment advice.**
