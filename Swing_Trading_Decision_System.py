@@ -50,6 +50,17 @@ TEXT = {
     "reason_relative_strength_weak": {"zh": "相對大盤強度不足", "en": "Weak relative strength vs. market"},
     "reason_institutional_flow_weak": {"zh": "法人動向偏弱", "en": "Weak institutional flow"},
     "reason_sector_flow_weak": {"zh": "產業資金流向偏弱", "en": "Weak sector fund flow"},
+    "reason_market_regime_bear": {"zh": "大盤處於空頭環境，暫不建議進場（個股本身分數已達標）",
+                                  "en": "Market is in a bear regime — holding off new entries (the stock's own score qualifies)"},
+
+    "market_bull": {"zh": "大盤環境：多頭（0050 位於季線上方 {gap:+.1f}%）",
+                    "en": "Market regime: Bullish (0050 is {gap:+.1f}% vs. its 60-day average)"},
+    "market_neutral": {"zh": "大盤環境：盤整／轉弱觀察（0050 跌破季線 {gap:+.1f}%，月線仍在季線上方）",
+                       "en": "Market regime: Neutral / weakening (0050 is {gap:+.1f}% vs. its 60-day average; 20-day average still above it)"},
+    "market_bear": {"zh": "⚠️ 大盤環境：空頭（0050 位於季線 {gap:+.1f}%，月線也在季線之下）——所有「買進」訊號暫時降為「觀察」",
+                    "en": "⚠️ Market regime: Bearish (0050 is {gap:+.1f}% vs. its 60-day average, with the 20-day average also below it) — all Buy signals are temporarily downgraded to Watch"},
+    "score_adjust_suffix": {"zh": "（含調整係數：追高折扣 ×{fresh:.2f}、量能折扣 ×{vol:.2f}）",
+                            "en": " (includes adjustments: extension discount ×{fresh:.2f}, volume discount ×{vol:.2f})"},
 
     # 對應基本面守門檢查沒過的原因代碼（AVOID 用）
     "reason_overvalued": {"zh": "估值過虛（本益比或本淨比明顯偏離同業）", "en": "Overvalued (P/E or P/B far above industry peers)"},
@@ -71,13 +82,13 @@ TEXT = {
 
     "explain_buy_now": {
         "zh": [
-            "股票分數（技術籌碼分數）：技術趨勢、動能、相對強度、法人動向、產業資金流向五項加權計算，滿分100，完全不含基本面成分（權重明細見下方*）",
-            "買進的判斷條件（只看兩件事）：① 基本面通過守門檢查（估值未過虛、EPS優於去年、毛利率沒有嚴重惡化——景氣循環股豁免毛利率檢查） ② 股票分數≥85",
+            "股票分數（技術籌碼分數）：技術趨勢、動能、相對強度、法人動向、產業資金流向五項加權計算，滿分100，完全不含基本面成分（權重明細見下方*）；再乘上兩個風險折扣係數——追高折扣（離10日線太遠／趨勢已走很久）與量能折扣（近20日下跌日量大於上漲日量）",
+            "買進的判斷條件：① 基本面通過守門檢查（估值未過虛、EPS優於去年、毛利率沒有嚴重惡化——景氣循環股豁免毛利率檢查） ② 股票分數≥85 ③ 大盤環境不是空頭（0050 在季線之下且月線也在季線之下時，買進訊號暫時降為觀察）",
             "基本面合理價格：一般股優先以「今年上半年EPS×(去年全年EPS÷去年上半年EPS)」估算全年EPS，乘以同業本益比基準；景氣循環股改用「每股淨值×同業本淨比基準」",
         ],
         "en": [
-            "Stock Score (technical/institutional score): weighted combination of trend, momentum, relative strength, institutional flow and sector flow, out of 100, with no fundamental component at all (weights below*)",
-            "Buy criteria (only two things matter): ① fundamentals pass the gate check (valuation not overextended, EPS above last year, no severe margin decline — cyclical stocks are exempt from the margin check) ② Stock Score ≥ 85",
+            "Stock Score (technical/institutional score): weighted combination of trend, momentum, relative strength, institutional flow and sector flow, out of 100, with no fundamental component at all (weights below*); then multiplied by two risk-discount factors — an extension discount (too far above the 10-day average / trend already mature) and a volume discount (down-day volume exceeding up-day volume over the last 20 days)",
+            "Buy criteria: ① fundamentals pass the gate check (valuation not overextended, EPS above last year, no severe margin decline — cyclical stocks are exempt from the margin check) ② Stock Score ≥ 85 ③ the market regime is not bearish (when 0050 is below its 60-day average and its 20-day average is also below it, Buy signals are temporarily downgraded to Watch)",
             "Fundamental fair value: non-cyclical stocks estimate full-year EPS via H1 EPS × (last year's full-year EPS ÷ last year's H1 EPS), multiplied by the industry P/E benchmark; cyclical stocks use book value per share × industry P/B benchmark instead",
         ],
     },
@@ -157,17 +168,23 @@ def translate_reasons(codes: list[str]) -> str:
     return "、".join(t(f"reason_{code}") if f"reason_{code}" in TEXT else code for code in codes)
 
 
-@st.cache_data(ttl=3600, persist="disk")
-def _cached_run_decision_system():
+@st.cache_data(ttl=3600)
+def _cached_run_decision_system(data_date: str):
     """
     包一層 Streamlit 快取，避免使用者每次跟頁面互動都要重新打資料庫、
-    重新算全部163檔股票的完整決策流程。快取1小時。
-    persist="disk"：改存到硬碟，重啟 Streamlit 程式也不會清空快取。
+    重新算全部163檔股票的完整決策流程。
+
+    ⚠️ 2026/10 修正：把「資料庫最新資料日期」當成快取鍵（data_date 參數）。
+    資料庫一有新一天的資料，日期變了，快取鍵就跟著變，自動重新計算——不需要
+    等快取過期、也不需要手動按重新整理。同一天內快取照樣有效（最多1小時）。
+    同時拿掉了 persist="disk"：Streamlit 的硬碟快取不支援 TTL（會直接忽略），
+    快取永遠不會自動過期；現在整段計算只需約7秒，不需要為了省這幾秒犧牲正確性。
+    data_date 本身不參與計算，只用來讓不同日期對應到不同的快取。
     """
     return pipeline.run_decision_system()
 
 
-@st.cache_data(ttl=3600, persist="disk")
+@st.cache_data(ttl=600)
 def _cached_latest_data_date():
     """
     查詢資料庫裡實際最新一筆股價資料的日期，供頁面上方「資料更新至」
@@ -253,9 +270,16 @@ if st.sidebar.button(
     st.cache_data.clear()
     st.rerun()
 
+# 先查資料庫最新資料日期（很輕量、快取10分鐘），當作計算結果的快取鍵：
+# 新資料一進來，最多10分鐘內頁面就會自動重新計算，不用手動重新整理。
+try:
+    latest_date = _cached_latest_data_date()
+except Exception:
+    latest_date = None  # 查不到就退回只靠1小時 TTL，不影響主要功能
+
 with st.spinner(t("loading")):
     try:
-        decisions = _cached_run_decision_system()
+        decisions = _cached_run_decision_system(str(latest_date))
     except Exception:
         # 不管是不是開發者，都先把完整錯誤堆疊寫進伺服器 log（Manage app 看得到），
         # 一般訪客的畫面仍然只會看到維護頁，不會洩漏任何技術細節。
@@ -276,11 +300,6 @@ if not decisions:
 
 lang = i18n.get_lang()
 
-try:
-    latest_date = _cached_latest_data_date()
-except Exception:
-    latest_date = None  # 次要資訊查詢失敗時，安靜地不顯示這行文字就好，
-                         # 不影響整頁其他核心功能的正常運作
 if latest_date is not None:
     st.caption(t("data_updated", date=latest_date.strftime("%Y/%m/%d")))
 
@@ -291,6 +310,16 @@ if missing_ids:
     st.warning(t("coverage_partial", n=len(covered_ids), total=len(WATCHLIST)) + "、".join(missing_ids))
 else:
     st.caption(t("coverage_full", n=len(covered_ids), total=len(WATCHLIST)))
+
+# ---- 大盤環境提示（所有個股共用同一個大盤狀態，取第一檔即可）----
+_regime = getattr(decisions[0], "market_regime", "unknown")
+_gap = getattr(decisions[0], "market_gap_pct", None)
+if _gap is not None and _regime in ("bull", "neutral", "bear"):
+    _msg = t(f"market_{_regime}", gap=_gap)
+    if _regime == "bear":
+        st.warning(_msg)
+    else:
+        st.caption(_msg)
 
 
 def get_name(d) -> str:
@@ -333,7 +362,11 @@ def format_score_breakdown(d) -> str:
         value = d.sub_scores.get(key)
         value_str = f"{value:.1f}" if value is not None else "-"
         parts.append(f"{key}={value_str}({weight*100:.0f}%)")
-    return t("score_breakdown_prefix") + "、".join(parts) + t("score_breakdown_suffix", total=d.stock_score)
+    text = t("score_breakdown_prefix") + "、".join(parts) + t("score_breakdown_suffix", total=d.stock_score)
+    mult = getattr(d, "score_multipliers", None)
+    if mult and (mult.get("freshness", 1.0) < 0.995 or mult.get("volume", 1.0) < 0.995):
+        text += t("score_adjust_suffix", fresh=mult.get("freshness", 1.0), vol=mult.get("volume", 1.0))
+    return text
 
 
 def render_search_result(d):
