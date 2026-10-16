@@ -32,6 +32,9 @@ INSERT 全部歷史）都會跟著無限增長——跟 db.py／sector_flow.py �
 財報不是這支腳本處理的範圍）。如果真的需要保證絕對正確，可以加上
 --full 參數強制對全部股票做一次完整重算：
     python calc_technical_indicators.py --full
+
+⚠️ 2026/10：有股票分割紀錄的股票（見 corporate_actions.py）每次都整段重算，
+因為 staging 層的歷史價格已被還原，舊的指標不能留著。
 """
 
 import os
@@ -43,6 +46,7 @@ import pandas as pd
 import numpy as np
 
 from watchlist import WATCHLIST
+from corporate_actions import SPLIT_STOCK_IDS
 
 # ---- 資料庫連線設定：從環境變數讀取，不寫死在程式碼裡 ----
 # 本機測試時，把 .env.example 複製成 .env 並填入真實值（.env 已在 .gitignore 中，不會被上傳）
@@ -249,7 +253,10 @@ def main():
     total = len(WATCHLIST)
     for i, stock_id in enumerate(WATCHLIST, start=1):
         try:
-            last_date = None if force_full else get_last_computed_date(engine, stock_id)
+            # 有分割紀錄的股票：staging 整段歷史都被還原過，指標必須整段重算
+            # （增量模式只重算最近 250 天，分割之前的舊指標會留著舊值）
+            has_split = stock_id in SPLIT_STOCK_IDS
+            last_date = None if (force_full or has_split) else get_last_computed_date(engine, stock_id)
 
             if last_date is None:
                 result = transform_full(engine, stock_id)
@@ -257,7 +264,7 @@ def main():
                     print(f"[{i}/{total}] {stock_id} staging layer 沒有資料，跳過")
                     continue
                 load_to_mart(engine, result, stock_id, from_date=None)
-                mode = "強制全量重算" if force_full else "首次完整計算"
+                mode = "強制全量重算" if force_full else ("分割還原後整段重算" if has_split else "首次完整計算")
                 print(f"[{i}/{total}] {stock_id} {mode}完成，共 {len(result)} 筆")
             else:
                 result = transform_incremental(engine, stock_id, last_date)
