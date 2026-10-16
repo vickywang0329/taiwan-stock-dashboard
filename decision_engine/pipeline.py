@@ -16,6 +16,17 @@ from . import db, scoring, engine, valuation
 import sector_flow
 
 
+def _n_day_return(close_series: pd.Series, n: int) -> float:
+    """
+    真正的 N 個交易日報酬：最新收盤 / N 個交易日前的收盤 - 1。
+    歷史不足 N+1 筆時，退而使用能取得的最早一筆（避免新股/缺資料直接報錯）。
+    """
+    if len(close_series) < 2:
+        return 0.0
+    base = close_series.iloc[-(n + 1)] if len(close_series) > n else close_series.iloc[0]
+    return float(close_series.iloc[-1] / base - 1)
+
+
 def _compute_sub_scores(stock_hist: pd.DataFrame, indicators_row: pd.Series,
                          benchmark_return: float, sector_rank_pct: float) -> dict:
     """
@@ -25,7 +36,7 @@ def _compute_sub_scores(stock_hist: pd.DataFrame, indicators_row: pd.Series,
     這個字典裡加權——見 engine.check_fundamentals()。
     """
     close = stock_hist["close"].iloc[-1]
-    stock_return = close / stock_hist["close"].iloc[0] - 1
+    stock_return = _n_day_return(stock_hist["close"], scoring.RS_LOOKBACK_DAYS)
 
     net_buy_days = (stock_hist["institutional_net"].tail(scoring.INSTITUTIONAL_LOOKBACK_DAYS) > 0).sum()
     total_days = min(scoring.INSTITUTIONAL_LOOKBACK_DAYS, len(stock_hist))
@@ -37,7 +48,7 @@ def _compute_sub_scores(stock_hist: pd.DataFrame, indicators_row: pd.Series,
 
     return {
         "trend": scoring.trend_score(
-            close, indicators_row["ma5"], indicators_row["ma20"], indicators_row["ma60"]
+            close, indicators_row["ma5"], indicators_row["ma10"], indicators_row["ma60"]
         ),
         "momentum": scoring.momentum_score(
             indicators_row["rsi14"], indicators_row.get("macd_hist")
@@ -64,18 +75,21 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
     indicators = db.load_latest_indicators(stock_ids).set_index("stock_id")
     info = db.load_stock_info(stock_ids).set_index("stock_id")
     eps_raw = db.load_eps_quarterly(stock_ids)
+    ma10_hist = db.load_ma10_history(stock_ids, lookback_days=60)
 
     # ---- 效能優化：先依股票代碼分組一次，後面對每檔股票就是 O(1) 查表，
-    #      不用每次都對整份 90天×163檔 的價格表重新做一次線性掃描。
-    #      這個分組動作，原本在下面的迴圈裡對每檔股票各做了2次（前置計算
-    #      一次、正式判斷一次），163檔×2=326次線性掃描，改成這樣只掃描一次。----
+    #      不用每次都對整份 90天×163檔 的價格表重新做一次線性掃描。----
     price_hist_by_stock = {sid: g.sort_values("date") for sid, g in price_hist.groupby("stock_id")}
     eps_by_stock = {sid: g for sid, g in eps_raw.groupby("stock_id")} if not eps_raw.empty else {}
+    ma10_hist_by_stock = (
+        {sid: g.sort_values("date") for sid, g in ma10_hist.groupby("stock_id")}
+        if not ma10_hist.empty else {}
+    )
 
     benchmark_id = db.COLUMNS["benchmark_stock_id"]
     bm_hist = price_hist_by_stock.get(benchmark_id, pd.DataFrame())
     benchmark_return = (
-        bm_hist["close"].iloc[-1] / bm_hist["close"].iloc[0] - 1 if len(bm_hist) > 1 else 0.0
+        _n_day_return(bm_hist["close"], scoring.RS_LOOKBACK_DAYS) if len(bm_hist) > 1 else 0.0
     )
 
     # ---- 預先算好「全體股票」的本益比(P/E)跟股價淨值比(P/B)，才能建立
@@ -127,7 +141,6 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
         if hist is None or len(hist) < 25 or stock_id not in indicators.index:
             continue  # 資料不足先跳過
 
-
         ind_row = indicators.loc[stock_id]
         name = info.loc[stock_id, "name_zh"] if stock_id in info.index else stock_id
         name_en = info.loc[stock_id, "name_en"] if stock_id in info.index else stock_id
@@ -140,14 +153,18 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
         stock_estimate = estimate_lookup.get(stock_id)
         stock_is_loss = is_loss_lookup.get(stock_id, False)
 
+        # 龍頭股用比較寬鬆的過虛門檻（見 valuation.LEADING_STOCKS_THRESHOLD 的說明），
+        # 查不到就用全市場預設的 valuation.OVERVALUATION_THRESHOLD
+        custom_threshold = valuation.LEADING_STOCKS_THRESHOLD.get(stock_id, valuation.OVERVALUATION_THRESHOLD)
+
         if is_cyclical:
+            # 景氣循環股：valuation 改用 P/B，不用 P/E（見使用者確認的設計）
             stock_pb = pb_lookup.get(stock_id)
             industry_avg_pb = industry_pb_benchmark.get(sector)
             has_neg_equity = bvps_status_lookup.get(stock_id) == "negative_equity"
-            custom_threshold = valuation.LEADING_STOCKS_THRESHOLD.get(stock_id, valuation.OVERVALUATION_THRESHOLD)
             overvalued = valuation.is_overvalued(
                 stock_pb, industry_avg_pb, is_loss=has_neg_equity, threshold_multiple=custom_threshold,
-                )
+            )
             # 合理價格用P/B×每股淨值反推，跟非循環股用P/E×EPS的概念一致，
             # 但循環股的每股淨值需要重新算一次（前面預備階段沒有保留bvps本身，只留了狀態）
             stock_eps_df_for_bvps = eps_by_stock.get(stock_id, pd.DataFrame())
@@ -160,11 +177,12 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
         else:
             industry_avg_pe = industry_pe_benchmark.get(sector)
             stock_pe = pe_lookup.get(stock_id)
-            custom_threshold = valuation.LEADING_STOCKS_THRESHOLD.get(stock_id, valuation.OVERVALUATION_THRESHOLD)
             overvalued = valuation.is_overvalued(
                 stock_pe, industry_avg_pe, is_loss=stock_is_loss, threshold_multiple=custom_threshold,
             )
-
+            # 合理價格 = 估算全年EPS × 產業同業本益比基準
+            # ⚠️ 要求 EPS 估算值必須是正值——虧損公司用本益比×EPS算「合理價格」
+            # 沒有意義（會算出負的價格），比照 compute_pe() 同樣的邏輯處理
             fair_value = (
                 stock_estimate * industry_avg_pe
                 if stock_estimate is not None and stock_estimate > 0 and industry_avg_pe is not None
@@ -179,6 +197,17 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
 
         close = hist["close"].iloc[-1]
 
+        # ---- 動能新鮮度：算出收盤價連續站上MA10幾天，換算成分數折扣係數 ----
+        stock_ma10_hist = ma10_hist_by_stock.get(stock_id)
+        if stock_ma10_hist is not None and not stock_ma10_hist.empty:
+            merged = hist[["date", "close"]].merge(
+                stock_ma10_hist[["date", "ma10"]], on="date", how="inner",
+            ).sort_values("date")
+            days_count = scoring.days_above_ma(merged["close"], merged["ma10"])
+        else:
+            days_count = None
+        freshness_multiplier = scoring.momentum_freshness_multiplier(days_count)
+
         decision = engine.decide(
             stock_id=stock_id,
             name=name,
@@ -189,9 +218,9 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
             margin_severely_declining=margin_declining,
             is_cyclical=is_cyclical,
             fair_value_estimate=fair_value,
+            freshness_multiplier=freshness_multiplier,
         )
         decision.name_en = name_en
         results.append(decision)
 
     return results
-
