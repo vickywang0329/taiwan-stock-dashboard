@@ -24,6 +24,7 @@ pattern.py 整條計算路徑都從決策流程裡移除，不再附掛任何「
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
+import numpy as np
 
 from . import scoring
 
@@ -108,12 +109,19 @@ def decide(
     margin_severely_declining: bool,
     is_cyclical: bool,
     fair_value_estimate: float | None = None,
+    freshness_multiplier: float = 1.0,
 ) -> StockDecision:
     """
     單一股票的完整決策流程。訊號只由「基本面守門」+「技術籌碼分數」
     兩個維度決定，見模組頂端說明，不涉及任何技術面型態或風險報酬比判斷。
+
+    freshness_multiplier：動能新鮮度折扣係數（見 scoring.momentum_freshness_multiplier）
+    ——連續站上MA10越久的股票，這個係數越小，反映「動能可能已經延續很久，
+    接近尾聲」的風險。套用在五項子分數加權平均之後，不改動個別子分數
+    本身的計算方式。
     """
-    tech_score = scoring.compute_tech_score(sub_scores)
+    tech_score = scoring.compute_tech_score(sub_scores) * freshness_multiplier
+    tech_score = round(float(np.clip(tech_score, 0, 100)), 1)
 
     fundamentals_pass, fail_reasons = check_fundamentals(
         is_overvalued, eps_growing, margin_severely_declining, is_cyclical,

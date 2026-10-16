@@ -106,26 +106,28 @@ INSTITUTIONAL_LOOKBACK_DAYS = 10  # 法人買賣超觀察區間
 TREND_SENSITIVITY = 0.03  # ⚠️ 初始假設，之後用回測校準
 
 
-def trend_score(close: float, ma5: float, ma20: float, ma60: float) -> float:
+def trend_score(close: float, ma5: float, ma10: float, ma60: float) -> float:
     """
-    技術趨勢分數（漸進式 0-100，不是離散的0/25/50/75/100）：
-    收盤價/MA5/MA20/MA60 四組關係，各自算出百分比差距，
-    用S型函數映射成分數，四組取平均——跟 relative_strength_score /
-    margin_trend_score / valuation_score 用同一套設計語言。
+    技術趨勢分數（漸進式 0-100）：
+    收盤價/MA5/MA10/MA60 四組關係，各自算出百分比差距，
+    用S型函數映射成分數，四組取平均。
+
+    ⚠️ 2026/09 修正記錄：原本用 MA20 當中期均線，使用者反映系統對新出現的
+    變化反應太慢（買進區常常是動能已經延續一段時間、接近尾聲的股票）。
+    改用反應更快的 MA10 取代 MA20，讓分數能更快速反映最新的價格變化，
+    代價是雜訊也會變多（短期洗盤更容易被誤判成趨勢轉弱）。
 
     每組差距為0（剛好持平）→ 50分（中性）；差距為正（多頭排列成立）
     → 分數越高於50分，差距越大分數越接近100；差距為負 → 分數越低於50分，
-    差距越大分數越接近0。跟舊版離散給分最大的差異：能反映「多頭排列的
-    強弱程度」，不會因為「剛好突破一點點」跟「大幅突破」給一樣的分數，
-    也不會因為「些微跌破」就整項直接歸零。
+    差距越大分數越接近0。
     """
-    if any(v in (None, 0) or pd.isna(v) for v in (ma5, ma20, ma60)):
+    if any(v in (None, 0) or pd.isna(v) for v in (ma5, ma10, ma60)):
         return 50.0
 
     gaps = [
         (close - ma5) / ma5,
-        (ma5 - ma20) / ma20,
-        (ma20 - ma60) / ma60,
+        (ma5 - ma10) / ma10,
+        (ma10 - ma60) / ma60,
         (close - ma60) / ma60,
     ]
     scores = [100 / (1 + np.exp(-gap / TREND_SENSITIVITY)) for gap in gaps]
@@ -225,3 +227,59 @@ def bias_ok(close: float, breakout_price: float, atr14: float) -> bool:
         return False
     distance = (close - breakout_price) / atr14
     return 0 <= distance <= ENTRY_SCORE_SWEET_SPOT_ATR
+
+
+# ---------------------------------------------------------------------------
+# ⚠️ 2026/09 新增：動能新鮮度折扣（回應使用者觀察：買進區常常是動能已經
+# 延續一段時間、大戶準備出貨階段的股票，某種意義上像反指標）。
+#
+# 核心概念：算出「收盤價連續站在MA10之上，已經持續了幾天」——天數越少，
+# 代表這波動能越新，不打折；天數越多（例如超過20天），代表這波已經
+# 延續很久，可能是大戶已經拉抬到尾聲、準備出貨的階段，給予分數折扣。
+#
+# ⚠️ 不打到0，避免過度否定一檔仍在延續的強勢股（強勢股確實可能持續
+# 強勢很長一段時間，這只是一個「風險提示」的折扣，不是「不可能」的
+# 判斷）。⚠️ 下面兩個天數門檻、最低折扣係數都是初始假設，之後回測校準。
+# ---------------------------------------------------------------------------
+FRESHNESS_FULL_BONUS_DAYS = 5     # 連續站上均線5天以內，視為「剛啟動」，不打折
+FRESHNESS_FULL_PENALTY_DAYS = 20  # 連續站上均線20天以上，視為「延續很久」，打到最低折扣
+FRESHNESS_MIN_MULTIPLIER = 0.7    # 最深的折扣係數，不打到0
+
+
+def days_above_ma(close_series: pd.Series, ma_series: pd.Series, max_lookback: int = 60) -> int:
+    """
+    計算收盤價連續站在均線之上的交易日數，從最新一天往回數，遇到跌破
+    或缺資料就停止累計。用來判斷目前的多頭動能是「剛啟動」還是
+    「已經延續很久」。
+
+    close_series / ma_series 需要依日期由舊到新排序（跟 pipeline.py 裡
+    hist DataFrame 的慣例一致）。
+    """
+    count = 0
+    n = len(close_series)
+    for i in range(n - 1, -1, -1):
+        c, m = close_series.iloc[i], ma_series.iloc[i]
+        if pd.isna(c) or pd.isna(m) or c <= m:
+            break
+        count += 1
+        if count >= max_lookback:
+            break
+    return count
+
+
+def momentum_freshness_multiplier(days_above_ma_count: int | None) -> float:
+    """
+    動能新鮮度折扣係數（1.0=完全不打折，FRESHNESS_MIN_MULTIPLIER=打到最深）。
+    連續站上均線的天數，落在 FULL_BONUS 跟 FULL_PENALTY 兩個門檻之間時，
+    用線性插值算出中間的折扣程度。
+    """
+    if days_above_ma_count is None:
+        return 1.0
+    if days_above_ma_count <= FRESHNESS_FULL_BONUS_DAYS:
+        return 1.0
+    if days_above_ma_count >= FRESHNESS_FULL_PENALTY_DAYS:
+        return FRESHNESS_MIN_MULTIPLIER
+
+    span = FRESHNESS_FULL_PENALTY_DAYS - FRESHNESS_FULL_BONUS_DAYS
+    progress = (days_above_ma_count - FRESHNESS_FULL_BONUS_DAYS) / span
+    return 1.0 - progress * (1.0 - FRESHNESS_MIN_MULTIPLIER)
