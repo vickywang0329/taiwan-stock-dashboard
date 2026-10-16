@@ -257,6 +257,10 @@ with st.spinner(t("loading")):
     try:
         decisions = _cached_run_decision_system()
     except Exception:
+        # 不管是不是開發者，都先把完整錯誤堆疊寫進伺服器 log（Manage app 看得到），
+        # 一般訪客的畫面仍然只會看到維護頁，不會洩漏任何技術細節。
+        import traceback
+        print("[page] decision system failed:\n" + traceback.format_exc(), flush=True)
         # 第二道防線：一開始連線檢查有過關，但實際執行主要查詢時才出錯
         # （例如查詢途中逾時）——開發者繞過模式下，直接把完整例外往外拋，
         # 讓 Streamlit 顯示真正的錯誤堆疊方便除錯；一般使用者則看到
