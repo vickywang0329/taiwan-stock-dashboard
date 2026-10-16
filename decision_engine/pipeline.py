@@ -8,12 +8,23 @@ decision_engine/pipeline.py
    兩邊共用同一份排名結果，不要重算兩次。
 """
 from __future__ import annotations
+import time
 import pandas as pd
 import numpy as np
 
 from watchlist import WATCHLIST  # 專案既有的觀察池清單（單一來源）
 from . import db, scoring, engine, valuation
 import sector_flow
+
+
+_T0 = [0.0]
+
+
+def _tick(label: str) -> None:
+    """計時 log：印出每個步驟距離上一步花了幾秒（Streamlit Cloud 的 Manage app log 看得到）。"""
+    now = time.perf_counter()
+    print(f"[pipeline] {label}: {now - _T0[0]:.1f}s", flush=True)
+    _T0[0] = now
 
 
 def _n_day_return(close_series: pd.Series, n: int) -> float:
@@ -67,18 +78,26 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
     （跟 pages/sector_heatmap.py 共用同一套算法，數字不會對不上）。
     未傳入時，自動呼叫 sector_flow.get_sector_rank_lookup() 取得近10日的真實排名。
     """
+    _T0[0] = time.perf_counter()
+    print("[pipeline] start", flush=True)
     if sector_rank_lookup is None:
         sector_rank_lookup = sector_flow.get_sector_rank_lookup(window="10d")
 
+    _tick("sector_rank_lookup")
     stock_ids = list(WATCHLIST)
     price_hist = db.load_price_history(stock_ids, lookback_days=90)
+    _tick("load_price_history")
     indicators = db.load_latest_indicators(stock_ids).set_index("stock_id")
+    _tick("load_latest_indicators")
     info = db.load_stock_info(stock_ids).set_index("stock_id")
+    _tick("load_stock_info")
     eps_raw = db.load_eps_quarterly(stock_ids)
+    _tick("load_eps_quarterly")
     ma10_hist = db.load_ma10_history(stock_ids, lookback_days=60)
 
     # ---- 效能優化：先依股票代碼分組一次，後面對每檔股票就是 O(1) 查表，
     #      不用每次都對整份 90天×163檔 的價格表重新做一次線性掃描。----
+    _tick("load_ma10_history")
     price_hist_by_stock = {sid: g.sort_values("date") for sid, g in price_hist.groupby("stock_id")}
     eps_by_stock = {sid: g for sid, g in eps_raw.groupby("stock_id")} if not eps_raw.empty else {}
     ma10_hist_by_stock = (
@@ -123,6 +142,7 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
         if pb is not None:
             pb_records.append({"stock_id": stock_id, "industry": info.loc[stock_id, "sector_zh"], "pb": pb})
 
+    _tick("precompute PE/PB")
     pe_df = pd.DataFrame(pe_records)
     industry_pe_benchmark = (
         valuation.compute_industry_pe_benchmark(pe_df) if not pe_df.empty else {}
@@ -135,6 +155,7 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
     )
     pb_lookup = dict(zip(pb_df["stock_id"], pb_df["pb"])) if not pb_df.empty else {}
 
+    _tick("industry benchmarks")
     results = []
     for stock_id in stock_ids:
         hist = price_hist_by_stock.get(stock_id)
@@ -223,4 +244,5 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
         decision.name_en = name_en
         results.append(decision)
 
+    _tick("per-stock decisions")
     return results
