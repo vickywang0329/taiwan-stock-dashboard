@@ -37,7 +37,12 @@ def get_engine():
     dbname = _get_secret("DB_NAME", "postgres")
     safe_password = quote_plus(password) if password else password
     url = f"postgresql+psycopg2://{user}:{safe_password}@{host}:{port}/{dbname}"
-    return create_engine(url, pool_pre_ping=True)
+    # connect_timeout：連線階段最多等 10 秒，卡住時快速失敗並顯示真正錯誤，
+    # 不會讓頁面無限轉圈；keepalives 避免閒置連線被中途切斷。
+    return create_engine(
+        url, pool_pre_ping=True,
+        connect_args={"connect_timeout": 10, "keepalives": 1, "keepalives_idle": 30},
+    )
 
 
 @contextmanager
