@@ -8,6 +8,7 @@ mart.technical_indicators / raw.stock_info）。
 """
 from __future__ import annotations
 import os
+import threading
 from contextlib import contextmanager
 from decimal import Decimal
 from urllib.parse import quote_plus
@@ -29,20 +30,43 @@ def _get_secret(key: str, default: str | None = None) -> str | None:
     return os.environ.get(key, default)
 
 
+_ENGINE = None
+_ENGINE_LOCK = threading.Lock()
+
+
 def get_engine():
-    user = _get_secret("DB_USER")
-    password = _get_secret("DB_PASSWORD")
-    host = _get_secret("DB_HOST", "aws-0-ap-northeast-1.pooler.supabase.com")
-    port = _get_secret("DB_PORT", "5432")
-    dbname = _get_secret("DB_NAME", "postgres")
-    safe_password = quote_plus(password) if password else password
-    url = f"postgresql+psycopg2://{user}:{safe_password}@{host}:{port}/{dbname}"
-    # connect_timeout：連線階段最多等 10 秒，卡住時快速失敗並顯示真正錯誤，
-    # 不會讓頁面無限轉圈；keepalives 避免閒置連線被中途切斷。
-    return create_engine(
-        url, pool_pre_ping=True,
-        connect_args={"connect_timeout": 10, "keepalives": 1, "keepalives_idle": 30},
-    )
+    """
+    全程式共用「同一個」連線引擎（singleton）。
+
+    ⚠️ 修正記錄：舊版每呼叫一次 get_engine() 就 create_engine() 一次，
+    每個引擎各自帶一個連線池，用完 conn.close() 只是還給「那個沒人再用的
+    引擎」，真正的資料庫連線卻一直開著、沒有被關掉。每次載入頁面查 6~7 次
+    就漏 6~7 條連線，累積後把 Supabase pooler 的連線額度佔滿，之後新的
+    連線就一直等不到位子，頁面無限轉圈（Supabase 上看到的一排 DISCARD ALL
+    閒置連線就是這個）。改成全程式只建一個引擎、連線池大小固定，連線會被
+    重複使用，不會越積越多。
+    """
+    global _ENGINE
+    if _ENGINE is not None:
+        return _ENGINE
+    with _ENGINE_LOCK:
+        if _ENGINE is None:
+            user = _get_secret("DB_USER")
+            password = _get_secret("DB_PASSWORD")
+            host = _get_secret("DB_HOST", "aws-0-ap-northeast-1.pooler.supabase.com")
+            port = _get_secret("DB_PORT", "5432")
+            dbname = _get_secret("DB_NAME", "postgres")
+            safe_password = quote_plus(password) if password else password
+            url = f"postgresql+psycopg2://{user}:{safe_password}@{host}:{port}/{dbname}"
+            _ENGINE = create_engine(
+                url,
+                pool_size=2, max_overflow=3,   # 連線數上限固定（最多5條），不會無限增加
+                pool_recycle=240,              # 超過4分鐘的舊連線自動換新，避免被 pooler 單方面切斷
+                pool_pre_ping=True,            # 取用前先確認連線還活著
+                # connect_timeout：連線階段最多等10秒，卡住時快速失敗並顯示真正錯誤
+                connect_args={"connect_timeout": 10, "keepalives": 1, "keepalives_idle": 30},
+            )
+    return _ENGINE
 
 
 @contextmanager
