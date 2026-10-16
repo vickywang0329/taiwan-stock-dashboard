@@ -280,7 +280,8 @@ def load_eps_quarterly(stock_ids: list[str]) -> pd.DataFrame:
     """
     df = _query_df(sql, {"ids": stock_ids})
     df["date"] = pd.to_datetime(df["date"])
-    return df
+    from corporate_actions import adjust_eps_for_splits
+    return adjust_eps_for_splits(df)
 
 
 def get_latest_data_date():
