@@ -59,7 +59,8 @@ def _compute_sub_scores(stock_hist: pd.DataFrame, indicators_row: pd.Series,
 
     return {
         "trend": scoring.trend_score(
-            close, indicators_row["ma5"], indicators_row["ma10"], indicators_row["ma60"]
+            close, indicators_row["ma5"], indicators_row["ma10"], indicators_row["ma60"],
+            atr14=indicators_row.get("atr14"),
         ),
         "momentum": scoring.momentum_score(
             indicators_row["rsi14"], indicators_row.get("macd_hist")
@@ -110,6 +111,13 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
     benchmark_return = (
         _n_day_return(bm_hist["close"], scoring.RS_LOOKBACK_DAYS) if len(bm_hist) > 1 else 0.0
     )
+
+    # ---- 大盤環境（只算一次，所有個股共用）：用 0050 的收盤價判斷多頭／盤整／空頭 ----
+    regime, regime_gap_pct = (
+        scoring.market_regime(bm_hist["close"].reset_index(drop=True))
+        if not bm_hist.empty else ("unknown", None)
+    )
+    print(f"[pipeline] market regime: {regime} (0050 vs MA60: {regime_gap_pct})", flush=True)
 
     # ---- 預先算好「全體股票」的本益比(P/E)跟股價淨值比(P/B)，才能建立
     #      同產業基準（缺一不可，同業基準需要看過整個觀察池才算得出來，
@@ -227,7 +235,13 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
             days_count = scoring.days_above_ma(merged["close"], merged["ma10"])
         else:
             days_count = None
-        freshness_multiplier = scoring.momentum_freshness_multiplier(days_count)
+        vol_mult = scoring.volume_multiplier(
+            scoring.updown_volume_ratio(hist["close"], hist["volume"])
+            if "volume" in hist.columns else None
+        )
+        freshness_multiplier = scoring.combined_freshness_multiplier(
+            days_count, float(close), ind_row.get("ma10"), ind_row.get("atr14"),
+        )
 
         decision = engine.decide(
             stock_id=stock_id,
@@ -240,6 +254,9 @@ def run_decision_system(sector_rank_lookup: dict[str, float] | None = None) -> p
             is_cyclical=is_cyclical,
             fair_value_estimate=fair_value,
             freshness_multiplier=freshness_multiplier,
+            volume_multiplier=vol_mult,
+            market_regime=regime,
+            market_gap_pct=regime_gap_pct,
         )
         decision.name_en = name_en
         results.append(decision)

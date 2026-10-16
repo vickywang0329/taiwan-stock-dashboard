@@ -19,6 +19,10 @@ pattern.py 整條計算路徑都從決策流程裡移除，不再附掛任何「
   基本面未通過                       -> AVOID（再分兩種子類型，見 avoid_type）
   基本面通過 且 股票分數<85           -> WATCH   觀察
   基本面通過 且 股票分數>=85          -> BUY_NOW 買進
+                                        （例外：大盤環境為空頭時降為 WATCH，
+                                          見 scoring.market_regime，2026/10 新增）
+
+股票分數 = 五項加權分數 × 動能新鮮度折扣 × 量能折扣（兩個折扣見 scoring.py）。
 
 ⚠️ 下面 THRESHOLDS 一樣是初始假設，之後用回測校準。
 """
@@ -58,6 +62,9 @@ class StockDecision:
     sub_scores: dict | None = None  # 五項技術籌碼子分數，供頁面完整揭露計算成分
     current_price: float | None = None  # 個股單日收盤價，三種分類都會填入，供頁面統一顯示
     missing_conditions: list[str] = field(default_factory=list)  # WATCH 用：尚缺條件
+    market_regime: str = "unknown"          # 大盤環境："bull"/"neutral"/"bear"/"unknown"
+    market_gap_pct: float | None = None     # 大盤基準收盤價相對季線(MA60)的偏離 %
+    score_multipliers: dict | None = None   # {"freshness":…, "volume":…}，供頁面揭露分數調整
 
 
 def check_fundamentals(
@@ -110,6 +117,9 @@ def decide(
     is_cyclical: bool,
     fair_value_estimate: float | None = None,
     freshness_multiplier: float = 1.0,
+    volume_multiplier: float = 1.0,
+    market_regime: str = "unknown",
+    market_gap_pct: float | None = None,
 ) -> StockDecision:
     """
     單一股票的完整決策流程。訊號只由「基本面守門」+「技術籌碼分數」
@@ -119,12 +129,24 @@ def decide(
     ——連續站上MA10越久的股票，這個係數越小，反映「動能可能已經延續很久，
     接近尾聲」的風險。套用在五項子分數加權平均之後，不改動個別子分數
     本身的計算方式。
+
+    volume_multiplier：量能折扣係數（見 scoring.volume_multiplier）——近20日下跌日
+    成交量明顯大於上漲日（出貨跡象）時小於1，乘在加權分數之後。
+
+    market_regime：大盤環境（見 scoring.market_regime）。"bear"（空頭）時，
+    即使基本面與分數都達標，BUY_NOW 也降為 WATCH——大盤空頭時個股多頭訊號
+    勝率偏低。股票分數本身不變，只調整最終訊號。
     """
-    tech_score = scoring.compute_tech_score(sub_scores) * freshness_multiplier
+    tech_score = scoring.compute_tech_score(sub_scores) * freshness_multiplier * volume_multiplier
     tech_score = round(float(np.clip(tech_score, 0, 100)), 1)
 
     fundamentals_pass, fail_reasons = check_fundamentals(
         is_overvalued, eps_growing, margin_severely_declining, is_cyclical,
+    )
+    extras = dict(
+        market_regime=market_regime,
+        market_gap_pct=market_gap_pct,
+        score_multipliers={"freshness": freshness_multiplier, "volume": volume_multiplier},
     )
 
     if not fundamentals_pass:
@@ -140,9 +162,25 @@ def decide(
             fair_value_estimate=fair_value_estimate,
             sub_scores=sub_scores,
             current_price=close,
+            **extras,
         )
 
     if tech_score >= THRESHOLDS["tech_score_buy_now"]:
+        if market_regime == "bear":
+            # 基本面與分數都達標，但大盤處於空頭：降為觀察，原因單獨標示，
+            # 不是「分數不夠」。股票分數保持原樣，讓使用者看得出這檔個股本身是強的。
+            return StockDecision(
+                stock_id=stock_id,
+                name=name,
+                stock_score=tech_score,
+                signal="WATCH",
+                fundamentals_pass=True,
+                fair_value_estimate=fair_value_estimate,
+                sub_scores=sub_scores,
+                current_price=close,
+                missing_conditions=["market_regime_bear"],
+                **extras,
+            )
         return StockDecision(
             stock_id=stock_id,
             name=name,
@@ -152,6 +190,7 @@ def decide(
             fair_value_estimate=fair_value_estimate,
             sub_scores=sub_scores,
             current_price=close,
+            **extras,
         )
 
     return StockDecision(
@@ -164,4 +203,5 @@ def decide(
         sub_scores=sub_scores,
         current_price=close,
         missing_conditions=_missing_conditions_for_watch(sub_scores),
+        **extras,
     )

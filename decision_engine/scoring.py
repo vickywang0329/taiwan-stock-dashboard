@@ -103,34 +103,52 @@ INSTITUTIONAL_LOOKBACK_DAYS = 10  # 法人買賣超觀察區間
 # ---------------------------------------------------------------------------
 # 子分數
 # ---------------------------------------------------------------------------
-TREND_SENSITIVITY = 0.03  # ⚠️ 初始假設，之後用回測校準
+TREND_SENSITIVITY = 0.03  # 舊版（百分比差距）敏感度，僅在缺 ATR 資料時作為備援使用
+
+# ⚠️ 2026/10 修正：均線差距改用 ATR14（平均真實波幅）正規化，不再用「佔股價的
+# 百分比」。原因：同樣是「高於季線10%」，對低波動股（ATR約1.5%）是很強的訊號，
+# 對高波動股（ATR約4%）只是日常波動；而且舊版用固定3%的敏感度，兩個長期差距
+# （MA10-MA60、收盤-MA60）常常直接頂到接近100，強勢股之間分不出高下。
+# 改成「差距 ÷ ATR」之後，不同波動度的股票用同一把尺衡量；長期差距另外用較寬的
+# 敏感度（短期差距本來就小、長期差距本來就大，不能共用同一個刻度）。
+# 四個數字依序對應：收盤-MA5、MA5-MA10、MA10-MA60、收盤-MA60，單位都是「幾個ATR」。
+# （用台積電396天歷史資料校準過：新算法分數分布的中位數約68、95百分位約85，
+# 跟舊版的73／84大致相當，但不再被長期差距推到頂。）
+# ⚠️ 這四個敏感度都是初始假設，之後用回測校準。
+TREND_ATR_SENSITIVITY = (0.75, 0.75, 2.0, 3.0)
 
 
-def trend_score(close: float, ma5: float, ma10: float, ma60: float) -> float:
+def trend_score(close: float, ma5: float, ma10: float, ma60: float,
+                atr14: float | None = None) -> float:
     """
     技術趨勢分數（漸進式 0-100）：
-    收盤價/MA5/MA10/MA60 四組關係，各自算出百分比差距，
-    用S型函數映射成分數，四組取平均。
+    收盤價/MA5/MA10/MA60 四組關係，各自算出差距，用S型函數映射成分數，四組取平均。
 
-    ⚠️ 2026/09 修正記錄：原本用 MA20 當中期均線，使用者反映系統對新出現的
-    變化反應太慢（買進區常常是動能已經延續一段時間、接近尾聲的股票）。
-    改用反應更快的 MA10 取代 MA20，讓分數能更快速反映最新的價格變化，
-    代價是雜訊也會變多（短期洗盤更容易被誤判成趨勢轉弱）。
+    有 ATR14 時：差距用 ATR 正規化（單位＝幾個ATR），見 TREND_ATR_SENSITIVITY 說明。
+    沒有 ATR14（缺資料）時：退回舊版的百分比差距算法，不讓整項分數因缺資料而消失。
 
-    每組差距為0（剛好持平）→ 50分（中性）；差距為正（多頭排列成立）
-    → 分數越高於50分，差距越大分數越接近100；差距為負 → 分數越低於50分，
-    差距越大分數越接近0。
+    每組差距為0（剛好持平）→ 50分（中性）；差距為正（多頭排列成立）→ 分數越高於50分；
+    差距為負 → 分數越低於50分。
+
+    ⚠️ 2026/09 記錄：中期均線用 MA10 取代 MA20，反應更快，代價是雜訊較多。
     """
     if any(v in (None, 0) or pd.isna(v) for v in (ma5, ma10, ma60)):
         return 50.0
 
-    gaps = [
-        (close - ma5) / ma5,
-        (ma5 - ma10) / ma10,
-        (ma10 - ma60) / ma60,
-        (close - ma60) / ma60,
-    ]
-    scores = [100 / (1 + np.exp(-gap / TREND_SENSITIVITY)) for gap in gaps]
+    if atr14 is not None and not pd.isna(atr14) and atr14 > 0:
+        raw_gaps = [close - ma5, ma5 - ma10, ma10 - ma60, close - ma60]
+        scores = [
+            100 / (1 + np.exp(-(g / atr14) / sens))
+            for g, sens in zip(raw_gaps, TREND_ATR_SENSITIVITY)
+        ]
+    else:
+        gaps = [
+            (close - ma5) / ma5,
+            (ma5 - ma10) / ma10,
+            (ma10 - ma60) / ma60,
+            (close - ma60) / ma60,
+        ]
+        scores = [100 / (1 + np.exp(-gap / TREND_SENSITIVITY)) for gap in gaps]
     return float(np.clip(sum(scores) / len(scores), 0, 100))
 
 
@@ -230,20 +248,35 @@ def bias_ok(close: float, breakout_price: float, atr14: float) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# ⚠️ 2026/09 新增：動能新鮮度折扣（回應使用者觀察：買進區常常是動能已經
-# 延續一段時間、大戶準備出貨階段的股票，某種意義上像反指標）。
+# 動能新鮮度折扣（追高風險折扣）。兩個因子相乘：
 #
-# 核心概念：算出「收盤價連續站在MA10之上，已經持續了幾天」——天數越少，
-# 代表這波動能越新，不打折；天數越多（例如超過20天），代表這波已經
-# 延續很久，可能是大戶已經拉抬到尾聲、準備出貨的階段，給予分數折扣。
+# ⚠️ 2026/10 重新設計。舊版只看「連續站上MA10幾天」，有兩個問題：
+#   1. 只看天數、不看漲幅：三天暴漲25%的股票天數很「新鮮」，完全不被折扣；
+#      緩步墊高走了20天的股票卻被打到7折。真正的追高風險是「離均線多遠」。
+#   2. 折扣最低7折，配上85分門檻，趨勢走超過20天的股票分數上限只剩70分，
+#      永遠進不了買進——持續數月的長期龍頭（如台積電）因此幾乎不可能被選中。
 #
-# ⚠️ 不打到0，避免過度否定一檔仍在延續的強勢股（強勢股確實可能持續
-# 強勢很長一段時間，這只是一個「風險提示」的折扣，不是「不可能」的
-# 判斷）。⚠️ 下面兩個天數門檻、最低折扣係數都是初始假設，之後回測校準。
+# 新設計：
+#   A. 乖離程度折扣（主要因子）：(收盤價 − MA10) ÷ ATR14，單位是「幾個ATR」。
+#      ≤ EXT_FULL_ATR 不打折；≥ EXT_MAX_ATR 打到 EXT_MIN_MULTIPLIER，中間線性插值。
+#      用 ATR 正規化，不同波動度的股票用同一把尺衡量。
+#      （用台積電396天實際資料看過分布：乖離中位數0.6個ATR、90百分位2.3、
+#      最大4.6，所以門檻2.0~4.5大約只會折扣最極端的約10%交易日。）
+#   B. 持續天數折扣（次要因子，刻意放輕）：連續站上MA10的天數，最多只扣 5%。
+#      只作為「趨勢已成熟」的輕微提示，不再單獨把長期趨勢股擋在買進門外。
+#
+# 長期龍頭只要沒有離均線太遠（乖離小），就只會被扣最多5%——原始分數夠高
+# （約90分以上）仍然可以進入買進。
+#
+# ⚠️ 下面所有門檻、折扣係數都是初始假設，尚未回測驗證。
 # ---------------------------------------------------------------------------
-FRESHNESS_FULL_BONUS_DAYS = 5     # 連續站上均線5天以內，視為「剛啟動」，不打折
-FRESHNESS_FULL_PENALTY_DAYS = 20  # 連續站上均線20天以上，視為「延續很久」，打到最低折扣
-FRESHNESS_MIN_MULTIPLIER = 0.7    # 最深的折扣係數，不打到0
+EXT_FULL_ATR = 2.0         # 乖離 ≤ 2個ATR：不打折
+EXT_MAX_ATR = 4.5          # 乖離 ≥ 4.5個ATR：打到最低折扣
+EXT_MIN_MULTIPLIER = 0.7   # 乖離折扣的最低係數
+
+FRESHNESS_FULL_BONUS_DAYS = 10     # 連續站上均線10天以內：不打折
+FRESHNESS_FULL_PENALTY_DAYS = 40   # 連續站上均線40天以上：打到最低（輕微）折扣
+FRESHNESS_MIN_MULTIPLIER = 0.95    # 持續天數折扣最低係數：最多只扣5%
 
 
 def days_above_ma(close_series: pd.Series, ma_series: pd.Series, max_lookback: int = 60) -> int:
@@ -283,3 +316,112 @@ def momentum_freshness_multiplier(days_above_ma_count: int | None) -> float:
     span = FRESHNESS_FULL_PENALTY_DAYS - FRESHNESS_FULL_BONUS_DAYS
     progress = (days_above_ma_count - FRESHNESS_FULL_BONUS_DAYS) / span
     return 1.0 - progress * (1.0 - FRESHNESS_MIN_MULTIPLIER)
+
+
+def extension_multiplier(close: float, ma10: float, atr14: float) -> float:
+    """
+    乖離程度折扣係數：(收盤 − MA10) ÷ ATR14 = 距離均線幾個ATR。
+    收盤在均線之下（乖離為負）或缺資料 → 1.0（不打折；弱勢已由趨勢分數反映）。
+    """
+    if any(v is None or pd.isna(v) for v in (close, ma10, atr14)) or atr14 <= 0:
+        return 1.0
+    ext = (close - ma10) / atr14
+    if ext <= EXT_FULL_ATR:
+        return 1.0
+    if ext >= EXT_MAX_ATR:
+        return EXT_MIN_MULTIPLIER
+    progress = (ext - EXT_FULL_ATR) / (EXT_MAX_ATR - EXT_FULL_ATR)
+    return 1.0 - progress * (1.0 - EXT_MIN_MULTIPLIER)
+
+
+def combined_freshness_multiplier(days_above_ma_count: int | None, close: float,
+                                  ma10: float, atr14: float) -> float:
+    """最終折扣係數 = 乖離程度折扣 × 持續天數折扣（最低約 0.7 × 0.95 ≈ 0.665）。"""
+    return extension_multiplier(close, ma10, atr14) * momentum_freshness_multiplier(days_above_ma_count)
+
+
+# ---------------------------------------------------------------------------
+# ⚠️ 2026/10 新增：大盤環境判斷（市場過濾）
+#
+# 波段交易的第一道過濾：大盤在空頭走勢時，個股的多頭訊號勝率會明顯下降。
+# 用大盤基準（0050）的季線（MA60，台股習慣的多空分界）與月線（MA20）判斷：
+#   bull（多頭）：收盤價 ≥ MA60
+#   bear（空頭）：收盤價 < MA60，且 MA20 也在 MA60 之下（短中期趨勢都向下）
+#   neutral（盤整／轉弱觀察）：收盤價 < MA60，但 MA20 仍在 MA60 之上（剛跌破，尚未確認）
+# 空頭時，BUY_NOW 一律降為 WATCH（見 engine.decide）；其他狀態不影響訊號。
+#
+# 為什麼空頭要「收盤<MA60 且 MA20<MA60」兩個條件？用台積電396天資料做代理測試：
+# 只用「收盤<MA20 且 <MA60」會在空頭狀態來回切換13次，雜訊太多；
+# 加上「MA20<MA60」只切換3次，穩定很多。（⚠️ 只是單一股票代理測試，不是大盤實測。）
+# ---------------------------------------------------------------------------
+MARKET_MIN_ROWS = 60  # 至少要有60筆大盤收盤價才算得出MA60
+
+
+def market_regime(bm_close: pd.Series) -> tuple[str, float | None]:
+    """
+    回傳 (環境狀態, 收盤價相對MA60的偏離百分比)。
+    狀態："bull" / "neutral" / "bear" / "unknown"（資料不足，不啟用過濾）。
+    bm_close 需依日期由舊到新排序。
+    """
+    if bm_close is None or len(bm_close) < MARKET_MIN_ROWS:
+        return "unknown", None
+    ma20 = bm_close.tail(20).mean()
+    ma60 = bm_close.tail(60).mean()
+    close = bm_close.iloc[-1]
+    if pd.isna(close) or pd.isna(ma20) or pd.isna(ma60) or ma60 <= 0:
+        return "unknown", None
+    gap_pct = float((close / ma60 - 1) * 100)
+    if close >= ma60:
+        return "bull", gap_pct
+    if ma20 < ma60:
+        return "bear", gap_pct
+    return "neutral", gap_pct
+
+
+# ---------------------------------------------------------------------------
+# ⚠️ 2026/10 新增：成交量確認（量能折扣）
+#
+# 用「上漲日成交量 ÷ 下跌日成交量」（Up/Down Volume Ratio，IBD/CANSLIM 常用的
+# 籌碼累積／出貨指標）衡量近20個交易日的量價配合：
+#   ratio ≥ 1.0：上漲日量大於下跌日量（買盤主導），不打折
+#   ratio 越低：下跌日量越大（出貨跡象），折扣越深，ratio ≤ 0.6 打到最低
+# 跟動能新鮮度折扣一樣，是乘在五項加權分數之後的係數，不新增第六個加權項目，
+# 不改動使用者已確認的 TECH_WEIGHTS。
+# 用台積電396天資料看過分布：中位數1.13、25百分位0.72、10百分位0.43。
+# ⚠️ 下面的區間與最低係數都是初始假設，尚未回測驗證。
+# ---------------------------------------------------------------------------
+VOLUME_LOOKBACK_DAYS = 20
+VOLUME_MIN_VALID_DAYS = 10     # 有效漲跌日數不足時，不下判斷（回傳1.0）
+VOLUME_FULL_RATIO = 1.0        # ratio ≥ 1.0：不打折
+VOLUME_MIN_RATIO = 0.6         # ratio ≤ 0.6：打到最低係數
+VOLUME_MIN_MULTIPLIER = 0.88
+
+
+def updown_volume_ratio(close: pd.Series, volume: pd.Series,
+                        n: int = VOLUME_LOOKBACK_DAYS) -> float | None:
+    """近 n 日「上漲日總量 ÷ 下跌日總量」。平盤日不計。資料不足回傳 None。
+    下跌日量為0（全部上漲）時回傳 3.0（視為極強，上限值）。"""
+    if close is None or volume is None or len(close) < 3:
+        return None
+    c = close.tail(n + 1).reset_index(drop=True)
+    v = volume.tail(n + 1).reset_index(drop=True)
+    chg = c.diff().iloc[1:]
+    vol = v.iloc[1:]
+    valid = (~chg.isna()) & (~vol.isna()) & (chg != 0)
+    if int(valid.sum()) < VOLUME_MIN_VALID_DAYS:
+        return None
+    up = float(vol[valid & (chg > 0)].sum())
+    down = float(vol[valid & (chg < 0)].sum())
+    if down <= 0:
+        return 3.0 if up > 0 else None
+    return up / down
+
+
+def volume_multiplier(ratio: float | None) -> float:
+    """量能折扣係數（1.0＝不打折）。缺資料回傳 1.0（中性，不因缺資料受罰）。"""
+    if ratio is None or pd.isna(ratio) or ratio >= VOLUME_FULL_RATIO:
+        return 1.0
+    if ratio <= VOLUME_MIN_RATIO:
+        return VOLUME_MIN_MULTIPLIER
+    progress = (VOLUME_FULL_RATIO - ratio) / (VOLUME_FULL_RATIO - VOLUME_MIN_RATIO)
+    return 1.0 - progress * (1.0 - VOLUME_MIN_MULTIPLIER)
