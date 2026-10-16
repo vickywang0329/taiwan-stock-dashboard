@@ -30,3 +30,42 @@ SPLITS = [
 ]
 
 SPLIT_STOCK_IDS = frozenset(s for s, _, _ in SPLITS)
+
+
+# ---------------------------------------------------------------------------
+# EPS 分割調整
+#
+# raw.eps_quarterly 的 EPS 是各季「當時公布」的原始數字，FinMind 不會在分割後回頭
+# 重算歷史季度。但股價（staging）已經還原成分割後的單位，兩邊單位不一致，
+# 本益比、每股淨值就會算錯（例如緯穎分割 1 拆 3 之後，EPS 還是舊單位，
+# 本益比被低估 3 倍，同產業平均本益比也被拉低）。
+#
+# 規則：某一季的財報「法定公布期限」早於分割生效日 → 該季 EPS 是分割前單位，
+# 除以分割比例；期限晚於生效日 → 已經是分割後單位，不動。
+# 法定期限：Q1 5/15、Q2 8/14、Q3 11/14、Q4 隔年 3/31。
+# ---------------------------------------------------------------------------
+import pandas as pd
+
+_DEADLINE_MD = {3: (5, 15, 0), 6: (8, 14, 0), 9: (11, 14, 0), 12: (3, 31, 1)}
+
+
+def report_deadline(quarter_end) -> pd.Timestamp:
+    """財報季底日期 → 法定公布期限。"""
+    q = pd.Timestamp(quarter_end)
+    m, d, add_year = _DEADLINE_MD.get(q.month, (q.month, 28, 0))
+    return pd.Timestamp(year=q.year + add_year, month=m, day=d)
+
+
+def adjust_eps_for_splits(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    df 需含 stock_id、date（季底日期）、eps_cumulative 三欄。
+    回傳調整後的新 DataFrame（不改動傳入的物件）。
+    """
+    if df.empty or not SPLITS:
+        return df
+    out = df.copy()
+    deadlines = out["date"].apply(report_deadline)
+    for sid, eff_date, ratio in SPLITS:
+        mask = (out["stock_id"] == sid) & (deadlines < pd.Timestamp(eff_date))
+        out.loc[mask, "eps_cumulative"] = out.loc[mask, "eps_cumulative"] / ratio
+    return out
