@@ -19,12 +19,18 @@ pattern.py 整條計算路徑都從決策流程裡移除，不再附掛任何「
   基本面未通過                       -> AVOID（再分兩種子類型，見 avoid_type）
   基本面通過 且 股票分數<85           -> WATCH   觀察
   基本面通過 且 股票分數>=85          -> BUY_NOW 買進
-                                        （例外：大盤環境為空頭時降為 WATCH，
-                                          見 scoring.market_regime，2026/10 新增）
+                                        （例外：大盤環境不是多頭時降為 WATCH，
+                                          見 scoring.market_regime。
+                                          2026/10 新增空頭過濾；2026/10 再改成
+                                          「只在多頭進場」，中性與資料不足也降為 WATCH）
 
 股票分數 = 五項加權分數 × 動能新鮮度折扣 × 量能折扣（兩個折扣見 scoring.py）。
 
 ⚠️ 下面 THRESHOLDS 一樣是初始假設，之後用回測校準。
+
+⚠️ 「只在多頭進場」這條規則是看過回測結果之後才加的（事後觀察，不是樣本外驗證）。
+   回測（2018–2026，0050 為大盤基準）顯示：大盤為中性（收盤<MA60 但 MA20≥MA60）時
+   的完整買進區訊號，20 天平均淨報酬約 −3.3%，且比同日全體股票更差。
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -46,6 +52,13 @@ AVOID_TYPE_LABELS = {
     "fundamental_landmine": "基本面地雷",   # 技術籌碼分數尚可，但基本面未過關
     "double_fail": "雙重不合",              # 技術籌碼分數也不夠、基本面也沒過
 }
+
+# 大盤不是多頭時，BUY_NOW 降為 WATCH 的原因代碼（頁面要有對應的顯示文字）
+REGIME_BLOCK_REASONS = {
+    "bear": "market_regime_bear",        # 空頭
+    "neutral": "market_regime_neutral",  # 中性（剛跌破季線，尚未確認空頭）
+}
+REGIME_BLOCK_REASON_DEFAULT = "market_regime_unknown"  # 資料不足，保守起見不給買進
 
 
 @dataclass
@@ -133,9 +146,10 @@ def decide(
     volume_multiplier：量能折扣係數（見 scoring.volume_multiplier）——近20日下跌日
     成交量明顯大於上漲日（出貨跡象）時小於1，乘在加權分數之後。
 
-    market_regime：大盤環境（見 scoring.market_regime）。"bear"（空頭）時，
-    即使基本面與分數都達標，BUY_NOW 也降為 WATCH——大盤空頭時個股多頭訊號
-    勝率偏低。股票分數本身不變，只調整最終訊號。
+    market_regime：大盤環境（見 scoring.market_regime）。只有 "bull"（多頭）時才允許
+    BUY_NOW；"bear"（空頭）、"neutral"（中性，剛跌破季線）、"unknown"（資料不足）
+    時，即使基本面與分數都達標，BUY_NOW 也降為 WATCH。股票分數本身不變，
+    只調整最終訊號。
     """
     tech_score = scoring.compute_tech_score(sub_scores) * freshness_multiplier * volume_multiplier
     tech_score = round(float(np.clip(tech_score, 0, 100)), 1)
@@ -166,9 +180,10 @@ def decide(
         )
 
     if tech_score >= THRESHOLDS["tech_score_buy_now"]:
-        if market_regime == "bear":
-            # 基本面與分數都達標，但大盤處於空頭：降為觀察，原因單獨標示，
+        if market_regime != "bull":
+            # 基本面與分數都達標，但大盤不是多頭：降為觀察，原因單獨標示，
             # 不是「分數不夠」。股票分數保持原樣，讓使用者看得出這檔個股本身是強的。
+            reason = REGIME_BLOCK_REASONS.get(market_regime, REGIME_BLOCK_REASON_DEFAULT)
             return StockDecision(
                 stock_id=stock_id,
                 name=name,
@@ -178,7 +193,7 @@ def decide(
                 fair_value_estimate=fair_value_estimate,
                 sub_scores=sub_scores,
                 current_price=close,
-                missing_conditions=["market_regime_bear"],
+                missing_conditions=[reason],
                 **extras,
             )
         return StockDecision(
