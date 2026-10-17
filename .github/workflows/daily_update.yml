@@ -52,3 +52,7 @@ jobs:
           DB_PORT: ${{ secrets.DB_PORT }}
           DB_NAME: ${{ secrets.DB_NAME }}
         run: python calc_technical_indicators.py
+        
+      - name: Paper trading update
+        continue-on-error: true
+        run: python paper_trading.py run
