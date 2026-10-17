@@ -54,5 +54,13 @@ jobs:
         run: python calc_technical_indicators.py
         
       - name: Paper trading update
+        if: always()
         continue-on-error: true
+        env:
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
         run: python paper_trading.py run
