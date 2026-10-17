@@ -52,11 +52,21 @@ TEXT = {
     "reason_sector_flow_weak": {"zh": "產業資金流向偏弱", "en": "Weak sector fund flow"},
     "reason_market_regime_bear": {"zh": "大盤處於空頭環境，暫不建議進場（個股本身分數已達標）",
                                   "en": "Market is in a bear regime — holding off new entries (the stock's own score qualifies)"},
+    "reason_market_regime_neutral": {"zh": "大盤轉弱觀察中（0050 已跌破季線，尚未確認空頭），暫不建議進場（個股本身分數已達標）",
+                                     "en": "Market is weakening (0050 has fallen below its 60-day average, bear not yet confirmed) — holding off new entries (the stock's own score qualifies)"},
+    "reason_market_regime_unknown": {"zh": "大盤資料不足，無法確認多頭，暫不建議進場（個股本身分數已達標）",
+                                     "en": "Not enough market data to confirm a bull regime — holding off new entries (the stock's own score qualifies)"},
 
     "market_bull": {"zh": "大盤環境：多頭（0050 位於季線上方 {gap:+.1f}%）",
                     "en": "Market regime: Bullish (0050 is {gap:+.1f}% vs. its 60-day average)"},
-    "market_neutral": {"zh": "大盤環境：盤整／轉弱觀察（0050 跌破季線 {gap:+.1f}%，月線仍在季線上方）",
-                       "en": "Market regime: Neutral / weakening (0050 is {gap:+.1f}% vs. its 60-day average; 20-day average still above it)"},
+    "market_neutral": {"zh": "⚠️ 大盤環境：盤整／轉弱觀察（0050 跌破季線 {gap:+.1f}%，月線仍在季線上方）——大盤不是多頭，所有「買進」訊號暫時降為「觀察」",
+                       "en": "⚠️ Market regime: Neutral / weakening (0050 is {gap:+.1f}% vs. its 60-day average; 20-day average still above it) — the market is not bullish, so all Buy signals are temporarily downgraded to Watch"},
+    "market_unknown": {"zh": "⚠️ 大盤環境：資料不足，無法確認多頭——所有「買進」訊號暫時降為「觀察」",
+                       "en": "⚠️ Market regime: not enough data to confirm a bull market — all Buy signals are temporarily downgraded to Watch"},
+    "buy_now_empty_not_bull": {"zh": "目前大盤不是多頭，因此沒有任何股票列入買進；分數與基本面都達標的股票會列在「觀察」，尚缺條件標示為大盤環境。",
+                               "en": "The market is not bullish right now, so no stock is listed as Buy. Stocks that meet both the score and fundamentals bars appear under Watch, with the market regime shown as the missing condition."},
+    "buy_now_empty": {"zh": "目前沒有股票同時符合所有買進條件。",
+                      "en": "No stock currently meets all the Buy criteria."},
     "market_bear": {"zh": "⚠️ 大盤環境：空頭（0050 位於季線 {gap:+.1f}%，月線也在季線之下）——所有「買進」訊號暫時降為「觀察」",
                     "en": "⚠️ Market regime: Bearish (0050 is {gap:+.1f}% vs. its 60-day average, with the 20-day average also below it) — all Buy signals are temporarily downgraded to Watch"},
     "score_adjust_suffix": {"zh": "（含調整係數：追高折扣 ×{fresh:.2f}、量能折扣 ×{vol:.2f}）",
@@ -83,21 +93,23 @@ TEXT = {
     "explain_buy_now": {
         "zh": [
             "股票分數（技術籌碼分數）：技術趨勢、動能、相對強度、法人動向、產業資金流向五項加權計算，滿分100，完全不含基本面成分（權重明細見下方*）；再乘上兩個風險折扣係數——追高折扣（離10日線太遠／趨勢已走很久）與量能折扣（近20日下跌日量大於上漲日量）",
-            "買進的判斷條件：① 基本面通過守門檢查（估值未過虛、EPS優於去年、毛利率沒有嚴重惡化——景氣循環股豁免毛利率檢查） ② 股票分數≥85 ③ 大盤環境不是空頭（0050 在季線之下且月線也在季線之下時，買進訊號暫時降為觀察）",
+            "買進的判斷條件：① 基本面通過守門檢查（估值未過虛、EPS優於去年、毛利率沒有嚴重惡化——景氣循環股豁免毛利率檢查） ② 股票分數≥85 ③ 大盤環境為多頭（0050 收盤在季線之上）；0050 跌破季線（盤整／轉弱觀察或空頭）或大盤資料不足時，買進訊號暫時降為觀察",
             "基本面合理價格：一般股優先以「今年上半年EPS×(去年全年EPS÷去年上半年EPS)」估算全年EPS，乘以同業本益比基準；景氣循環股改用「每股淨值×同業本淨比基準」",
         ],
         "en": [
             "Stock Score (technical/institutional score): weighted combination of trend, momentum, relative strength, institutional flow and sector flow, out of 100, with no fundamental component at all (weights below*); then multiplied by two risk-discount factors — an extension discount (too far above the 10-day average / trend already mature) and a volume discount (down-day volume exceeding up-day volume over the last 20 days)",
-            "Buy criteria: ① fundamentals pass the gate check (valuation not overextended, EPS above last year, no severe margin decline — cyclical stocks are exempt from the margin check) ② Stock Score ≥ 85 ③ the market regime is not bearish (when 0050 is below its 60-day average and its 20-day average is also below it, Buy signals are temporarily downgraded to Watch)",
+            "Buy criteria: ① fundamentals pass the gate check (valuation not overextended, EPS above last year, no severe margin decline — cyclical stocks are exempt from the margin check) ② Stock Score ≥ 85 ③ the market regime is bullish (0050 closes above its 60-day average); when 0050 is below its 60-day average (neutral/weakening or bearish) or market data is insufficient, Buy signals are temporarily downgraded to Watch",
             "Fundamental fair value: non-cyclical stocks estimate full-year EPS via H1 EPS × (last year's full-year EPS ÷ last year's H1 EPS), multiplied by the industry P/E benchmark; cyclical stocks use book value per share × industry P/B benchmark instead",
         ],
     },
     "explain_watch": {
         "zh": [
             "觀察的意思：基本面已經通過守門檢查（體質沒問題），但股票分數還沒到85分，時機尚未成熟，持續追蹤",
+            "另一種觀察：基本面與股票分數都達標，但大盤不是多頭，買進訊號暫時降為觀察（尚缺條件會標示大盤環境）",
         ],
         "en": [
             "What \"watch\" means: fundamentals already pass the gate check (no red flags), but Stock Score hasn't reached 85 yet — not the right timing yet, keep tracking",
+            "Another kind of watch: fundamentals and Stock Score both qualify, but the market is not bullish, so the Buy signal is temporarily downgraded to Watch (the missing condition shows the market regime)",
         ],
     },
     "explain_avoid": {
@@ -115,21 +127,25 @@ TEXT = {
     "weights_note": {
         "zh": "*股票分數（技術籌碼分數）計算權重：trend 25%、momentum 20%、relative_strength 20%、"
               "institutional_flow 20%、sector_flow 15%（總計100%，不含任何基本面成分）。"
-              "基本面（估值/EPS成長/毛利率趨勢）改為獨立的守門檢查，不參與加權，見下方避免分類說明。尚未經過回測。",
+              "基本面（估值/EPS成長/毛利率趨勢）改為獨立的守門檢查，不參與加權，見下方避免分類說明。",
         "en": "*Stock Score (technical/institutional) weights: trend 25%, momentum 20%, relative_strength 20%, "
               "institutional_flow 20%, sector_flow 15% (100% total, no fundamental component). "
-              "Fundamentals (valuation/EPS growth/margin trend) are now a separate gate check, not weighted — see the Avoid categories below. Not yet backtested.",
+              "Fundamentals (valuation/EPS growth/margin trend) are now a separate gate check, not weighted — see the Avoid categories below.",
     },
     "col_score_range": {"zh": "股票分數", "en": "Stock score"},
     "col_signal": {"zh": "訊號", "en": "Signal"},
     "col_condition": {"zh": "條件", "en": "Condition"},
     "cond_buy_now": {
-        "zh": "基本面通過守門檢查，且股票分數≥85",
-        "en": "Fundamentals pass the gate check, and Stock Score ≥ 85",
+        "zh": "基本面通過守門檢查、股票分數≥85，且大盤為多頭",
+        "en": "Fundamentals pass the gate check, Stock Score ≥ 85, and the market is bullish",
     },
     "cond_watch": {
         "zh": "基本面通過守門檢查，但股票分數未達85",
         "en": "Fundamentals pass the gate check, but Stock Score is below 85",
+    },
+    "cond_watch_regime": {
+        "zh": "基本面通過守門檢查、股票分數≥85，但大盤不是多頭",
+        "en": "Fundamentals pass the gate check and Stock Score ≥ 85, but the market is not bullish",
     },
     "cond_avoid_fundamental": {
         "zh": "股票分數≥85，但基本面未通過守門檢查",
@@ -314,12 +330,12 @@ else:
 # ---- 大盤環境提示（所有個股共用同一個大盤狀態，取第一檔即可）----
 _regime = getattr(decisions[0], "market_regime", "unknown")
 _gap = getattr(decisions[0], "market_gap_pct", None)
-if _gap is not None and _regime in ("bull", "neutral", "bear"):
-    _msg = t(f"market_{_regime}", gap=_gap)
-    if _regime == "bear":
-        st.warning(_msg)
-    else:
-        st.caption(_msg)
+if _gap is not None and _regime == "bull":
+    st.caption(t("market_bull", gap=_gap))
+elif _gap is not None and _regime in ("neutral", "bear"):
+    st.warning(t(f"market_{_regime}", gap=_gap))
+else:
+    st.warning(t("market_unknown"))
 
 
 def get_name(d) -> str:
@@ -419,6 +435,8 @@ if buy_now:
         t("col_fair_value"): format_price(d.fair_value_estimate),
     } for d in buy_now]
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+else:
+    st.caption(t("buy_now_empty") if _regime == "bull" else t("buy_now_empty_not_bull"))
 for line in t("explain_buy_now"):
     st.caption(f"• {line}")
 
@@ -473,6 +491,7 @@ st.subheader(t("signal_table_title"))
 ref_rows = [
     {t("col_score_range"): "≥ 85", t("col_signal"): t("signal_buy_now"), t("col_condition"): t("cond_buy_now")},
     {t("col_score_range"): "< 85", t("col_signal"): t("signal_watch"), t("col_condition"): t("cond_watch")},
+    {t("col_score_range"): "≥ 85", t("col_signal"): t("signal_watch"), t("col_condition"): t("cond_watch_regime")},
     {t("col_score_range"): "≥ 85", t("col_signal"): t("signal_avoid_fundamental"), t("col_condition"): t("cond_avoid_fundamental")},
     {t("col_score_range"): "< 85", t("col_signal"): t("signal_avoid_double"), t("col_condition"): t("cond_avoid_double")},
 ]
