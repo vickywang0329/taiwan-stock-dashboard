@@ -127,10 +127,10 @@ TEXT = {
     "weights_note": {
         "zh": "*股票分數（技術籌碼分數）計算權重：trend 25%、momentum 20%、relative_strength 20%、"
               "institutional_flow 20%、sector_flow 15%（總計100%，不含任何基本面成分）。"
-              "基本面（估值/EPS成長/毛利率趨勢）改為獨立的守門檢查，不參與加權，見下方避免分類說明。",
+              "基本面（估值/EPS成長/毛利率趨勢）不參與加權。",
         "en": "*Stock Score (technical/institutional) weights: trend 25%, momentum 20%, relative_strength 20%, "
               "institutional_flow 20%, sector_flow 15% (100% total, no fundamental component). "
-              "Fundamentals (valuation/EPS growth/margin trend) are now a separate gate check, not weighted — see the Avoid categories below.",
+              "Fundamentals (valuation/EPS growth/margin trend) are a separate gate check, not weighted.",
     },
     "col_score_range": {"zh": "股票分數", "en": "Stock score"},
     "col_signal": {"zh": "訊號", "en": "Signal"},
