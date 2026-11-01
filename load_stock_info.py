@@ -2,7 +2,7 @@
 把公司中英文名稱 + 中英文產業分類清單匯入 raw.stock_info
 （改用自訂分類取代 FinMind 原始分類，準確度更高、且支援雙語顯示）
 
-執行前請先在 pgAdmin 的 Query Tool 執行一次以下 SQL：
+執行前先在 pgAdmin 的 Query Tool 執行一次以下 SQL：
 
     CREATE TABLE IF NOT EXISTS raw.stock_info (
         stock_id TEXT PRIMARY KEY,
@@ -25,7 +25,6 @@ from urllib.parse import quote_plus
 import pandas as pd
 
 # ---- 資料庫連線設定：從環境變數讀取，不寫死在程式碼裡 ----
-# 本機測試時，把 .env.example 複製成 .env 並填入真實值（.env 已在 .gitignore 中，不會被上傳）
 load_dotenv()
 
 DB_CONFIG = {
@@ -60,7 +59,6 @@ def main():
 
     engine = get_engine()
 
-    # 確保欄位存在（若之前的表沒有 industry_en，這裡順手補上）
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE raw.stock_info ADD COLUMN IF NOT EXISTS industry_en TEXT"))
 
