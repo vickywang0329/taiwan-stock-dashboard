@@ -2,18 +2,15 @@
 staging layer 轉換腳本（SQL 版本）
 從 raw schema 讀取三張原始表，清洗轉換後寫入 staging.daily_master。
 
-整段轉換用一條 INSERT ... SELECT 在資料庫內完成：
-資料不需要傳到執行這支程式的機器（例如 GitHub Actions）上，
-也不需要逐支股票來回查詢，通常幾秒鐘就能跑完。
+整段轉換用一條 INSERT ... SELECT 在資料庫內完成
 
 增量更新：預設只處理最近 LOOKBACK_DAYS 天的資料。
 需要全量重建時（例如第一次執行、補資料、watchlist 新增股票），
 設定環境變數 FULL_REFRESH=1。
 
-⚠️ 2026/10 新增：股票分割還原（見 corporate_actions.py）。
+⚠️ 2026/10：股票分割還原（見 corporate_actions.py）。
 raw 層保留原始未還原價格；轉成 staging 時，把分割生效日之前的價格除以
-分割比例、股數類欄位乘以分割比例。有分割紀錄的股票，每次都整段歷史重算
-（只有少數幾檔，成本很低），這樣新增分割紀錄後不需要手動全量重建。
+分割比例、股數類欄位乘以分割比例。
 """
 
 import os
@@ -28,7 +25,6 @@ from watchlist import WATCHLIST
 from corporate_actions import SPLITS, SPLIT_STOCK_IDS
 
 # ---- 資料庫連線設定：從環境變數讀取，不寫死在程式碼裡 ----
-# 本機測試時，把 .env.example 複製成 .env 並填入真實值（.env 已在 .gitignore 中，不會被上傳）
 load_dotenv()
 
 DB_CONFIG = {
@@ -46,7 +42,7 @@ LOOKBACK_DAYS = 14
 # 自營商相關的法人類別，加總成 dealer_net
 DEALER_NAMES = ("Dealer_self", "Dealer_Hedging", "Foreign_Dealer_Self")
 
-# 單日漲跌幅超過這個值，視為「可能是分割／減資」，印出警告提醒檢查
+# 單日漲跌幅超過這個值，視為可能是分割／減資，印出警告提醒檢查
 # （一般股票漲跌幅限制 10%；槓桿／反向 ETF 限制 20%）
 SPLIT_WARN_THRESHOLD = 0.115
 SPLIT_WARN_THRESHOLD_LEVERAGED = 0.215
@@ -153,12 +149,6 @@ SPLIT_CHECK_SQL = text(SPLIT_CHECK_SQL_TEXT)
 
 
 def _safe_error(e) -> str:
-    """
-    印出錯誤訊息前，先把密碼從字串裡過濾掉——避免資料庫連線失敗時，
-    底層套件的錯誤訊息不小心把完整連線字串（含密碼）一起印出來，
-    寫進 GitHub Actions 的執行日誌裡（尤其是 repo 設成 Public 之後，
-    日誌任何人都能看）。
-    """
     msg = str(e)
     password = DB_CONFIG.get("password")
     if password:
@@ -198,7 +188,7 @@ def main():
     since = get_since_date()
     full_since = date(2000, 1, 1)
 
-    # 有分割紀錄的股票：每次整段歷史重算（才能讓分割之前的舊資料也被還原）
+    # 有分割紀錄的股票：每次整段歷史重算
     split_ids = [s for s in WATCHLIST if s in SPLIT_STOCK_IDS]
     regular_ids = [s for s in WATCHLIST if s not in SPLIT_STOCK_IDS]
     jobs = [("一般股票", regular_ids, since)]
@@ -231,7 +221,7 @@ def main():
     print(f"刪除舊資料 {deleted} 筆，寫入新資料 {inserted} 筆"
           f"（{len(WATCHLIST)} 檔股票，耗時 {elapsed:.1f} 秒）")
 
-    # 還原之後仍出現單日大幅漲跌 → 可能是還沒登記的分割／減資，印出警告（不中斷流程）
+    # 還原之後仍出現單日大幅漲跌-->可能是還沒登記的分割／減資，印出警告（不中斷流程）
     try:
         with engine.connect() as conn:
             rows = conn.execute(SPLIT_CHECK_SQL, {
