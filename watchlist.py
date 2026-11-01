@@ -1,9 +1,8 @@
 """
 共用觀察池清單
-所有資料處理腳本（fetch / staging / mart）都應該從這裡 import WATCHLIST，
-不要各自複製一份，避免清單不同步。
+所有資料處理腳本（fetch / staging / mart）都應該從這裡 import WATCHLIST
 
-新增或移除股票時，只需要改這個檔案，然後重新執行：
+新增或移除股票時，改這個檔案+重新執行：
     1. python fetch_taiwan50_to_raw.py
     2. python transform_to_staging.py
     3. python calc_technical_indicators.py
