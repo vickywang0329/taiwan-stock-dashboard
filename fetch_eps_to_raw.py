@@ -6,9 +6,9 @@
   供景氣循環股的 P/B 估值使用（每檔股票 2 次 FinMind API 呼叫：損益表 + 資產負債表）
 
 ⚠️ 從 2.5 年延長到 4 年，是為了讓景氣循環股（航運/記憶體/塑化石化/鋼鐵）的
-毛利率、波動度等計算，能涵蓋更長的景氣週期——但要老實說：4年仍然可能無法
-涵蓋完整的一個循環週期（例如萬海航運真正的暴衝高點在2021Q4~2022Q2，
-距今已超過4年），這是一個部分改善，不是完整解法。
+毛利率、波動度等計算，能涵蓋更長的景氣週期；4年仍可能無法
+涵蓋完整的一個循環週期（如萬海航運真正的暴衝高點在2021Q4~2022Q2，
+距今已超過4年）
 
 執行方式：python fetch_eps_to_raw.py            # 全部更新
 診斷單一股票：python fetch_eps_to_raw.py --check 2603
@@ -42,10 +42,7 @@ END_DATE = date.today().isoformat()
 
 def _safe_error(e) -> str:
     """
-    印出錯誤訊息前，先把密碼從字串裡過濾掉——避免資料庫連線失敗時，
-    底層套件的錯誤訊息不小心把完整連線字串（含密碼）一起印出來，
-    寫進 GitHub Actions 的執行日誌裡（尤其是 repo 設成 Public 之後，
-    日誌任何人都能看）。
+    印出錯誤訊息前，先把密碼從字串裡過濾掉
     """
     msg = str(e)
     password = DB_CONFIG.get("password")
@@ -73,12 +70,6 @@ ALL_COLS = ["eps_cumulative", "gross_profit", "cost_of_goods_sold", "net_income"
 def build_wide(income: pd.DataFrame, bs: pd.DataFrame) -> pd.DataFrame:
     """
     把損益表（EPS、毛利、營業成本、淨利）與資產負債表（股東權益）合併成一季一列。
-
-    ⚠️ 關鍵修正：FinMind 的 EquityAttributableToOwnersOfParent 這個名稱，
-    在「損益表」裡是「歸屬母公司業主的本期淨利」，在「資產負債表」裡才是「歸屬母公司業主權益」，
-    兩者同名但意義不同。舊版只呼叫損益表，所以 equity 欄位從來沒有真正的股東權益。
-    這裡損益表的同名欄位改當作 net_income（歸屬母公司淨利，與 EPS 的計算基礎一致），
-    equity 一律取自資產負債表。
     """
     if income is None or income.empty:
         return pd.DataFrame()
