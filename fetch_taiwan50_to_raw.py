@@ -6,8 +6,6 @@
   抓到今天為止。回溯的目的是讓三大法人、融資融券這類較晚公布或事後修正的資料，
   在之後幾天的執行中自動補齊。
 - 資料庫裡還沒有這檔股票的股價資料時，從 DEFAULT_START_DATE 開始完整回補。
-- 不再要求三張表都要有資料：有些標的（例如槓桿／反向 ETF）本來就沒有融資融券
-  或法人資料，舊版會把它們誤判成「新股票」，導致每天都從頭全量重抓。
 """
 
 from FinMind.data import DataLoader
@@ -23,7 +21,6 @@ from datetime import date, timedelta
 from watchlist import WATCHLIST
 
 # ---- 資料庫連線設定：從環境變數讀取，不寫死在程式碼裡 ----
-# 本機測試時，把 .env.example 複製成 .env 並填入真實值（.env 已在 .gitignore 中，不會被上傳）
 load_dotenv()
 
 DB_CONFIG = {
@@ -49,10 +46,7 @@ RAW_TABLES = ["stock_price", "institutional_investors", "margin_short_sale"]
 
 def _safe_error(e) -> str:
     """
-    印出錯誤訊息前，先把密碼從字串裡過濾掉——避免資料庫連線失敗時，
-    底層套件的錯誤訊息不小心把完整連線字串（含密碼）一起印出來，
-    寫進 GitHub Actions 的執行日誌裡（尤其是 repo 設成 Public 之後，
-    日誌任何人都能看）。
+    印出錯誤訊息前，先把密碼從字串裡過濾掉
     """
     msg = str(e)
     password = DB_CONFIG.get("password")
