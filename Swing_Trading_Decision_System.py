@@ -1,8 +1,7 @@
 """
 波段交易決策系統 Swing Trading Decision System
-主入口頁面（放在 dashboard_project 根目錄，取代原本的 dashboard.py 作為主入口）
 
-⚠️ 2026/08 架構簡化：使用者確認徹底拿掉「技術面型態明確」跟「風險報酬比
+⚠️ 2026/08 架構簡化：拿掉「技術面型態明確」跟「風險報酬比
 ≥2.0」這兩個條件，訊號判斷只看兩件事：
   1. 基本面守門檢查（估值/EPS成長/毛利率趨勢，景氣循環股豁免毛利率檢查）
   2. 技術籌碼分數（Stock Score，trend/momentum/relative_strength/
@@ -220,8 +219,6 @@ i18n.init_language()
 def _is_dev_bypass() -> bool:
     """
     判斷目前訪問者是不是開發者本人（透過網址帶入密語繞過維護頁面）。
-    ⚠️ 密語存在 st.secrets（不會被上傳到公開的GitHub repo），不能寫死
-    在程式碼裡——這個 repo 是 Public 的，寫死在程式碼裡等於公開密碼。
     """
     try:
         dev_token = st.query_params.get("dev_token")
@@ -235,9 +232,7 @@ def _db_health_check() -> bool:
     """
     極輕量的資料庫連線健康檢查（SELECT 1），只是為了快速判斷「現在連得上
     資料庫嗎」，不涉及任何真正的業務查詢。查得到就是True，任何連線層級
-    的例外都視為False（不讓這一步本身的例外往外拋，因為這裡本來就是
-    專門用來判斷「是不是該顯示維護頁面」的邏輯，不該自己也噴出技術性
-    錯誤訊息給使用者看）。
+    的例外都視為False。
     """
     try:
         from sqlalchemy import text
@@ -251,8 +246,7 @@ def _db_health_check() -> bool:
 def render_maintenance_page():
     """
     維護頁面：極簡的一行訊息 + 重試按鈕，不把技術性的錯誤堆疊訊息
-    (traceback) 直接暴露給外部使用者看。中英文都支援（沿用 i18n 既有的
-    語言切換機制，使用者可以在這個畫面上切換語言）。
+    (traceback) 直接暴露給外部使用者看。
     """
     lang = i18n.get_lang()
     st.markdown(
